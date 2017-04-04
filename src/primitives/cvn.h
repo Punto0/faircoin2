@@ -193,6 +193,8 @@ public:
     uint32_t nCreatorId; // the CVN node ID of the creator of the next block
     uint256 hashPrevBlock;
     CSchnorrSig signature;
+    uint32_t nCreationTime;
+
     bool fValidated; // memory only
 
     // contains the CVN IDs that did not co-sign (usually all in IDs in mapCVNs should sign)
@@ -212,6 +214,7 @@ public:
         this->signature         = sig.signature;
         this->fValidated        = sig.fValidated;
         this->vMissingSignerIds = sig.vMissingSignerIds;
+        this->nCreationTime     = sig.nCreationTime;
     }
 
     ADD_SERIALIZE_METHODS;
@@ -225,14 +228,16 @@ public:
         READWRITE(hashPrevBlock);
         READWRITE(signature);
         READWRITE(vMissingSignerIds);
+        READWRITE(nCreationTime);
     }
 
     void SetNull()
     {
-        nVersion   = CCvnPartialSignatureUnsinged::CURRENT_VERSION;
-        nSignerId  = 0;
-        nCreatorId = 0;
-        fValidated = false;
+        nVersion      = CCvnPartialSignatureUnsinged::CURRENT_VERSION;
+        nSignerId     = 0;
+        nCreatorId    = 0;
+        fValidated    = false;
+        nCreationTime = 0;
         hashPrevBlock.SetNull();
         signature.SetNull();
         vMissingSignerIds.clear();
@@ -382,8 +387,20 @@ public:
     /** minimum percentage of the number of nSignatureMean that are required to create the next block */
     uint32_t nPercentageOfSignaturesMean;
 
-    /** The maximum allowed size for a serialized block */
+    /** The maximum allowed size for a serialised block */
     uint32_t nMaxBlockSize;
+
+    /** The time (in sec.) to wait before CVNs start to create chain signatures again */
+    uint32_t nBlockPropagationWaitTime;
+
+    /** If a CVN has not received all partial signatures of a set it re-tries every
+     ** nRetryNewSigSetInterval sec. to create a new set without the CVN IDs that were missing*/
+    uint32_t nRetryNewSigSetInterval;
+
+    /** A short description of the changes
+     * A description string should be built like this:
+     * #nnnnn <URI to a document where the decision is documented> <text that describes the change> */
+    string strDescription;
 
     CDynamicChainParams()
     {
@@ -406,6 +423,9 @@ public:
         READWRITE(nBlocksToConsiderForSigCheck);
         READWRITE(nPercentageOfSignaturesMean);
         READWRITE(nMaxBlockSize);
+        READWRITE(nBlockPropagationWaitTime);
+        READWRITE(nRetryNewSigSetInterval);
+        READWRITE(strDescription);
     }
 
     void SetNull()
@@ -421,6 +441,9 @@ public:
         nBlocksToConsiderForSigCheck = 0;
         nPercentageOfSignaturesMean = 0;
         nMaxBlockSize = 0;
+        nBlockPropagationWaitTime = 0;
+        nRetryNewSigSetInterval = 0;
+        strDescription = "";
     }
 
     uint256 GetHash() const;
@@ -474,6 +497,7 @@ public:
     static const int32_t  FLUSH_SIGHOLDER_PAYLOAD = 1 << 4;
     static const int32_t       BLOCK_PAYLOAD_MASK = CVN_PAYLOAD | CHAIN_ADMINS_PAYLOAD | CHAIN_PARAMETERS_PAYLOAD | COIN_SUPPLY_PAYLOAD;
     uint32_t nPayload;
+    uint32_t nCreationTime;
 
     // this chain data must be contained in the block after this hash
     uint256 hashPrevBlock;
@@ -499,6 +523,7 @@ public:
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
         READWRITE(nPayload);
+        READWRITE(nCreationTime);
         READWRITE(hashPrevBlock);
         READWRITE(adminMultiSig);
         READWRITE(vAdminIds);
@@ -517,7 +542,8 @@ public:
 
     void SetNull()
     {
-        nPayload = 0;
+        nPayload      = 0;
+        nCreationTime = 0;
         hashPrevBlock.SetNull();
         adminMultiSig.SetNull();
         vAdminIds.clear();
@@ -611,6 +637,7 @@ class CNoncePool : public CNoncePoolUnsigned
 public:
     CSchnorrSig msgSig;
     uint32_t    nHeightAdded; // memory only
+    bool        fRecheck;     // memory only
 
     CNoncePool()
     {
@@ -621,6 +648,7 @@ public:
     {
         this->msgSig = msgSig;
         nHeightAdded = 0;
+        fRecheck     = false;
     }
 
     ADD_SERIALIZE_METHODS;
@@ -636,6 +664,7 @@ public:
         CNoncePoolUnsigned::SetNull();
         msgSig.SetNull();
         nHeightAdded = 0;
+        fRecheck     = false;
     }
 };
 

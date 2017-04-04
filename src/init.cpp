@@ -533,7 +533,9 @@ std::string HelpMessage(HelpMessageMode mode)
 std::string LicenseInfo()
 {
     // todo: remove urls from translations on next change
-    return FormatParagraph(strprintf(_("Copyright (C) 2009-%i The Bitcoin Core Developers"), COPYRIGHT_YEAR)) + "\n" +
+    return FormatParagraph(strprintf(_("Copyright (C) 2016-%i The FairCoin Core Developers"), COPYRIGHT_YEAR)) + "\n" +
+           "\n" +
+           FormatParagraph(_("Copyright (C) 2009-2016 The Bitcoin Core Developers")) + "\n" +
            "\n" +
            FormatParagraph(_("This is experimental software.")) + "\n" +
            "\n" +
@@ -1070,7 +1072,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
 
     // Sanity check
     if (!InitSanityCheck())
-        return InitError(_("Initialization sanity check failed. Bitcoin Core is shutting down."));
+        return InitError(_("Initialization sanity check failed. FairCoin Core is shutting down."));
 
     std::string strDataDir = GetDataDir().string();
 #ifdef ENABLE_WALLET
@@ -1086,9 +1088,9 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     try {
         static boost::interprocess::file_lock lock(pathLockFile.string().c_str());
         if (!lock.try_lock())
-            return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Bitcoin Core is probably already running."), strDataDir));
+            return InitError(strprintf(_("Cannot obtain a lock on data directory %s. FairCoin Core is probably already running."), strDataDir));
     } catch(const boost::interprocess::interprocess_exception& e) {
-        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Bitcoin Core is probably already running.") + " %s.", strDataDir, e.what()));
+        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. FairCoin Core is probably already running.") + " %s.", strDataDir, e.what()));
     }
 
 #ifndef WIN32
@@ -1225,10 +1227,13 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
 
     // sanitize comments per BIP-0014, format user agent and check total size
     std::vector<string> uacomments;
+    std::string strClientName = CLIENT_NAME;
 #if 1
     //TODO: remove this; for development only
     if (nCvnNodeId) {
-        uacomments.push_back(strprintf("0x%08x-%s", nCvnNodeId, GitCommit()));
+        strClientName += strprintf("-0x%08x-%s", nCvnNodeId, GitCommit());
+    } else {
+        strClientName += strprintf("-%s", GitCommit());
     }
 #endif
     BOOST_FOREACH(string cmt, mapMultiArgs["-uacomment"])
@@ -1237,7 +1242,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
             return InitError(strprintf(_("User Agent comment (%s) contains unsafe characters."), cmt));
         uacomments.push_back(SanitizeString(cmt, SAFE_CHARS_UA_COMMENT));
     }
-    strSubVersion = FormatSubVersion(CLIENT_NAME, CLIENT_VERSION, uacomments);
+    strSubVersion = FormatSubVersion(strClientName, CLIENT_VERSION, uacomments);
     if (strSubVersion.size() > MAX_SUBVERSION_LENGTH) {
         return InitError(strprintf(_("Total length of network version string (%i) exceeds maximum length (%i). Reduce the number or size of uacomments."),
             strSubVersion.size(), MAX_SUBVERSION_LENGTH));
@@ -1574,10 +1579,10 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
                              " or address book entries might be missing or incorrect."));
             }
             else if (nLoadWalletRet == DB_TOO_NEW)
-                strErrors << _("Error loading wallet.dat: Wallet requires newer version of Bitcoin Core") << "\n";
+                strErrors << _("Error loading wallet.dat: Wallet requires newer version of FairCoin Core") << "\n";
             else if (nLoadWalletRet == DB_NEED_REWRITE)
             {
-                strErrors << _("Wallet needed to be rewritten: restart Bitcoin Core to complete") << "\n";
+                strErrors << _("Wallet needed to be rewritten: restart FairCoin Core to complete") << "\n";
                 LogPrintf("%s", strErrors.str());
                 return InitError(strErrors.str());
             }

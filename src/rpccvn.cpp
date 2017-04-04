@@ -85,6 +85,7 @@ static bool AddDynParamsToMsg(CChainDataMsg& msg, UniValue jsonParams)
 {
     LogPrintf("AddDynParamsToMsg : adding %u parameters\n", jsonParams.getKeys().size());
 
+    //TODO: only for development, remove in production release
     UniValue flushSigholder = find_value(jsonParams, "flushSigholder");
     if (!flushSigholder.isNull()) {
         if (flushSigholder.isTrue()) {
@@ -109,12 +110,14 @@ static bool AddDynParamsToMsg(CChainDataMsg& msg, UniValue jsonParams)
     params.nBlocksToConsiderForSigCheck = dynParams.nBlocksToConsiderForSigCheck;
     params.nPercentageOfSignaturesMean  = dynParams.nPercentageOfSignaturesMean;
     params.nMaxBlockSize                = dynParams.nMaxBlockSize;
+    params.nBlockPropagationWaitTime    = dynParams.nBlockPropagationWaitTime;
+    params.nRetryNewSigSetInterval      = dynParams.nRetryNewSigSetInterval;
 
     bool fAllGood = true;
     vector<string> paramsList = jsonParams.getKeys();
     BOOST_FOREACH(const string& key, paramsList) {
         LogPrintf("AddDynParamsToMsg : adding %s: %u\n", key, jsonParams[key].getValStr());
-        if (key == "nBlockSpacing") {
+        if (key == "blockSpacing") {
             params.nBlockSpacing = jsonParams[key].get_int();
         } else if (key == "blockSpacingGracePeriod") {
             params.nBlockSpacingGracePeriod = jsonParams[key].get_int();
@@ -134,13 +137,19 @@ static bool AddDynParamsToMsg(CChainDataMsg& msg, UniValue jsonParams)
             params.nPercentageOfSignaturesMean = jsonParams[key].get_int();
         } else if (key == "maxBlockSize") {
             params.nMaxBlockSize = jsonParams[key].get_int();
+        } else if (key == "blockPropagationWaitTime") {
+            params.nBlockPropagationWaitTime = jsonParams[key].get_int();
+        } else if (key == "retryNewSigSetInterval") {
+            params.nRetryNewSigSetInterval = jsonParams[key].get_int();
+        } else if (key == "description") {
+            params.strDescription = jsonParams[key].get_str();
         } else {
             LogPrintf("parameter %s is invalid\n", key);
             fAllGood = false;
         }
     }
 
-    return fAllGood;
+    return fAllGood & (params.strDescription.length() > MIN_CHAIN_DATA_DESCRIPTION_LEN);
 }
 
 UniValue getgenerate(const UniValue& params, bool fHelp)
@@ -540,6 +549,9 @@ void DynamicChainparametersToJSON(CDynamicChainParams& cp, UniValue& result)
     result.push_back(Pair("blocksToConsiderForSigCheck", (int)cp.nBlocksToConsiderForSigCheck));
     result.push_back(Pair("percentageOfSignaturesMean", (int)cp.nPercentageOfSignaturesMean));
     result.push_back(Pair("maxBlockSize", (int)cp.nMaxBlockSize));
+    result.push_back(Pair("blockPropagationWaitTime", (int)cp.nBlockPropagationWaitTime));
+    result.push_back(Pair("retryNewSigSetInterval", (int)cp.nRetryNewSigSetInterval));
+    result.push_back(Pair("description", cp.strDescription));
 }
 
 UniValue setchainparameters(const UniValue& params, bool fHelp)
@@ -792,3 +804,21 @@ UniValue addcoinsupply(const UniValue& params, bool fHelp)
     return result;
 }
 #endif
+
+UniValue estimatefee(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw std::runtime_error(
+            "estimatefee nblocks\n"
+            "\nReturns the current mandatory fee per kilobyte needed for a transaction to be accepted.\n"
+            "\nArguments:\n"
+            "1. nblocks     (numeric, required) - dummy value for API compatibility\n"
+            "\nResult:\n"
+            "n              (numeric) mandatory fee-per-kilobyte\n"
+            "\n"
+            "\nExample:\n"
+            + HelpExampleCli("estimatefee", "123")
+            );
+
+    return ValueFromAmount(dynParams.nTransactionFee);
+}

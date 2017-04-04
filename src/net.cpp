@@ -74,7 +74,7 @@ namespace {
 //
 bool fDiscover = true;
 bool fListen = true;
-uint64_t nLocalServices = NODE_NETWORK | NODE_CVN_SIG;
+uint64_t nLocalServices = NODE_NETWORK | NODE_POC_DATA;
 CCriticalSection cs_mapLocalHost;
 map<CNetAddr, LocalServiceInfo> mapLocalHost;
 static bool vfLimited[NET_MAX] = {};
@@ -88,19 +88,7 @@ std::string strSubVersion;
 
 vector<CNode*> vNodes;
 CCriticalSection cs_vNodes;
-map<uint256, CTransaction> mapRelay;
-deque<pair<int64_t, uint256> > vRelayExpiration;
-CCriticalSection cs_mapRelay;
 limitedmap<uint256, int64_t> mapAlreadyAskedFor(MAX_INV_SZ);
-
-CCriticalSection cs_mapRelayNonces;
-map<uint256, CNoncePool> mapRelayNonces;
-
-CCriticalSection cs_mapRelaySigs;
-map<uint256, CCvnPartialSignature> mapRelaySigs;
-
-CCriticalSection cs_mapRelayChainData;
-map<uint256, CChainDataMsg> mapRelayChainData;
 
 static deque<string> vOneShots;
 CCriticalSection cs_vOneShots;
@@ -1229,8 +1217,12 @@ void ThreadSocketHandler()
                             int nErr = WSAGetLastError();
                             if (nErr != WSAEWOULDBLOCK && nErr != WSAEMSGSIZE && nErr != WSAEINTR && nErr != WSAEINPROGRESS)
                             {
-                                if (!pnode->fDisconnect)
-                                    LogPrintf("socket recv error %s\n", NetworkErrorString(nErr));
+                                if (!pnode->fDisconnect) {
+                                    if (fLogIPs)
+                                        LogPrintf("socket recv error for %s: %s\n", pnode->addr.ToString(), NetworkErrorString(nErr));
+                                    else
+                                        LogPrintf("socket recv error: %s\n", NetworkErrorString(nErr));
+                                }
                                 pnode->CloseSocketDisconnect();
                             }
                         }
@@ -1340,7 +1332,7 @@ void ThreadMapPort()
             }
         }
 
-        string strDesc = "Bitcoin " + FormatFullVersion();
+        string strDesc = "FairCoin " + FormatFullVersion();
 
         try {
             while (true) {
@@ -1846,7 +1838,7 @@ bool BindListenPort(const CService &addrBind, string& strError, bool fWhiteliste
     {
         int nErr = WSAGetLastError();
         if (nErr == WSAEADDRINUSE)
-            strError = strprintf(_("Unable to bind to %s on this computer. Bitcoin Core is probably already running."), addrBind.ToString());
+            strError = strprintf(_("Unable to bind to %s on this computer. FairCoin Core is probably already running."), addrBind.ToString());
         else
             strError = strprintf(_("Unable to bind to %s on this computer (bind returned error %s)"), addrBind.ToString(), NetworkErrorString(nErr));
         LogPrintf("%s\n", strError);
@@ -2053,18 +2045,6 @@ instance_of_cnetcleanup;
 void RelayTransaction(const CTransaction& tx)
 {
     CInv inv(MSG_TX, tx.GetHash());
-    {
-        LOCK(cs_mapRelay);
-        // Expire old relay messages
-        while (!vRelayExpiration.empty() && vRelayExpiration.front().first < GetTime())
-        {
-            mapRelay.erase(vRelayExpiration.front().second);
-            vRelayExpiration.pop_front();
-        }
-
-        mapRelay.insert(std::make_pair(inv.hash, tx));
-        vRelayExpiration.push_back(std::make_pair(GetTime() + 15 * 60, inv.hash));
-    }
     LOCK(cs_vNodes);
     BOOST_FOREACH(CNode* pnode, vNodes)
     {

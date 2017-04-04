@@ -32,8 +32,13 @@
 #define MAX_PERCENTAGE_OF_SIGNATURES_MEAN 100
 #define MIN_SIZE_OF_BLOCK 100000
 #define MAX_SIZE_OF_BLOCK 5000000
-#define NONCE_POOL_WAIT_TIME 20
+#define MIN_BLOCK_PROPAGATION_WAIT_TIME 1
+#define MAX_BLOCK_PROPAGATION_WAIT_TIME 3600
+#define MIN_RETRY_NEW_SIG_SET_INTERVAL 2
+#define MAX_RETRY_NEW_SIG_SET_INTERVAL 600
+#define MIN_CHAIN_DATA_DESCRIPTION_LEN 20
 
+#define DEFAULT_NONCES_TO_KEEP 4
 #define DEFAULT_NONCE_POOL_SIZE 20
 #define MAX_NONCE_POOL_SIZE 100
 
@@ -46,8 +51,6 @@ typedef std::map<const uint256, CChainDataMsg> ChainDataMapType;
 
 typedef std::map<uint32_t, CCvnPartialSignature> MapSigSigner;
 typedef std::map<const CSchnorrRx, MapSigSigner> MapSigCommonR;
-typedef std::map<uint32_t, MapSigCommonR> MapSigCreator;
-typedef std::map<const uint256, MapSigCreator> MapSigTip;
 
 typedef boost::unordered_set<uint32_t> TimeWeightSetType;
 typedef std::vector<uint32_t>::reverse_iterator CandidateIterator;
@@ -100,12 +103,13 @@ extern CachedCvnType mapChachedCVNInfoBlocks;
 
 enum POCState {
     INIT,
-    NONCE_POOL_CHANGES,
+    WAITING_FOR_BLOCK_PROPAGATION,
     CREATE_SIGNATURE,
     WAITING_FOR_SIGNATURES,
     WAITING_FOR_BLOCK,
     WAITING_FOR_NEW_TIP,
     WAITING_FOR_CVN_DATA,
+    UNDEFINED
 };
 
 class POCStateHolder {
@@ -117,8 +121,7 @@ public:
     uint32_t nLastCreator;
     uint32_t nSleep;
 
-    vector<uint32_t> vMissingSignatures;
-    CSchnorrRx commonRx;
+    vector<CSchnorrRx> commonRxs;
 
     CBlockIndex *pindexLastTip, *pindexPrev;
     const CChainParams& chainparams;
@@ -135,20 +138,18 @@ public:
 
         pindexPrev    = pindexPrevIn;
         pindexLastTip = pindexPrevIn;
-        vMissingSignatures.clear();
-        commonRx.SetNull();
+        commonRxs.clear();
     }
 
     void Reset(uint32_t nNextCreatorIn, CBlockIndex *pindexPrevIn)
     {
-        state         = NONCE_POOL_CHANGES;
+        state         = WAITING_FOR_BLOCK_PROPAGATION;
         nLastCreator  = nNextCreator;
         nNextCreator  = nNextCreatorIn;
         pindexLastTip = pindexPrev;
         pindexPrev    = pindexPrevIn;
         nSleep        = 0;
-        vMissingSignatures.clear();
-        commonRx.SetNull();
+        commonRxs.clear();
     }
 
     bool NewTip() const
@@ -172,7 +173,8 @@ class CSignatureHolder
 private:
 
 public:
-    MapSigTip mapTip;     // map per block hash
+    MapSigCommonR sigs;     // map signatures per common R point
+
     CCriticalSection cs_sigHolder;
 
     CSignatureHolder()
@@ -183,22 +185,24 @@ public:
     void SetNull()
     {
         LOCK(cs_sigHolder);
-        mapTip.clear();
+        sigs.clear();
     }
 
     void AddSig(const CCvnPartialSignature &sig);
-    MapSigSigner* GetSignatureSet(const CSchnorrRx &commonRx, const uint256 &hashPrevBlock, const uint32_t nNextCreator);
-    CCvnPartialSignature* GetSignature(const uint256 &hashPrevBlock, const uint32_t nNextCreator, const uint32_t nSignerId, const CSchnorrRx &commonRx);
-    bool GetSignatures(vector<CCvnPartialSignature> &sigs, const uint256 &hashPrevBlock, const uint32_t nNextCreator);
-    MapSigCommonR* GetCommonR(const uint256 &hashPrevBlock, const uint32_t nNextCreator);
-    void flushOldEntries(const uint256 &hashPrevBlock, const uint32_t nNextCreator);
+    MapSigSigner* GetSignatureSet(const CSchnorrRx &commonRx);
+    CCvnPartialSignature* GetSignature(const uint32_t nSignerId, const CSchnorrRx &commonRx);
+    bool GetSignatures(vector<CCvnPartialSignature> &sigs);
+    bool HasSigSetsToContributeTo(vector<vector<uint32_t> > &vSigSetsToContributeTo, const uint32_t nNodeId, const uint32_t nMaxSignatures);
+    bool GetAllMissing(vector<uint32_t> &vMissingSignerIds, const uint32_t nNodeId, const vector<CSchnorrRx> &commonRxs, const CNoncePoolType &mapNoncePool, const uint32_t nMaxSignatures);
+    bool HasCompleteSigSets(const uint32_t nMaxSignatures) const;
+    void clear(const uint32_t nNextCreator);
 
     std::string ToString();
 };
 
 extern CSignatureHolder sigHolder;
 
-extern void ExpireNoncePools(CBlockIndex *pindex);
+extern void CheckNoncePools(CBlockIndex *pindex);
 extern int32_t GetPoolAge(const CNoncePool &pool, CBlockIndex *pTip);
 extern bool AddToCvnInfoCache(const CBlock *pblock, const uint32_t nHeight);
 extern uint32_t GetNumChainSigs(const CBlockIndex *pindex);
@@ -215,7 +219,6 @@ extern bool CheckForDuplicateCvns(const CBlock& block);
 extern bool CheckForDuplicateChainAdmins(const CBlock& block);
 extern bool CheckForDuplicateAdminSigs(const CBlock& block);
 extern bool CheckForDuplicateMissingChainSigs(const CBlock& block);
-extern bool SendCVNSignature(const CBlockIndex *pindexNew);
 extern bool AddCvnSignature(CCvnPartialSignature& msg);
 extern bool AddChainData(const CChainDataMsg& msg);
 extern bool CvnVerifyPartialSignature(const CCvnPartialSignature &sig);

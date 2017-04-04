@@ -48,7 +48,7 @@
 using namespace std;
 
 #if defined(NDEBUG)
-# error "Bitcoin cannot be compiled without assertions."
+# error "FairCoin cannot be compiled without assertions."
 #endif
 
 /**
@@ -83,6 +83,23 @@ bool fEnableReplacement = DEFAULT_ENABLE_REPLACEMENT;
 CFeeRate minRelayTxFee = CFeeRate(DEFAULT_MIN_RELAY_TX_FEE);
 
 CTxMemPool mempool(::minRelayTxFee);
+
+std::map<uint256, CTransaction> mapRelay;
+std::deque<std::pair<int64_t, uint256> > vRelayExpiration;
+CCriticalSection cs_mapRelay;
+
+map<uint256, CNoncePool> mapRelayNonces;
+deque<pair<int64_t, uint256> > vRelayExpirationNonces;
+CCriticalSection cs_mapRelayNonces;
+
+map<uint256, CCvnPartialSignature> mapRelaySigs;
+deque<pair<int64_t, uint256> > vRelayExpirationSigs;
+CCriticalSection cs_mapRelaySigs;
+
+map<uint256, CChainDataMsg> mapRelayChainData;
+deque<pair<int64_t, uint256> > vRelayExpirationChainData;
+CCriticalSection cs_mapRelayChainData;
+
 
 struct COrphanTx {
     CTransaction tx;
@@ -2420,8 +2437,8 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
         UpdateChainAdmins(pblock);
 
     if (!IsInitialBlockDownload()) {
-        sigHolder.SetNull();
-        ExpireNoncePools(pindexNew);
+        sigHolder.clear(CheckNextBlockCreator(pindexNew, block.nTime + 1));
+        CheckNoncePools(pindexNew);
     }
 
     return true;
@@ -2933,10 +2950,6 @@ bool CheckBlock(const CBlock& block, CValidationState& state, bool fCheckPOC, bo
 
     if (fCheckPOC) {
         // check for correct signature of the block hash by the creator
-        if (!CvnVerifySignature(block.GetHash(), block.creatorSignature, block.nCreatorId))
-            return state.DoS(100, error("CheckBlock(): invalid creator signature"),
-                                         REJECT_INVALID, "bad-creator-sig", true);
-
         if (!CheckProofOfCooperation(block, Params().GetConsensus()))
             return state.DoS(2, error("CheckBlock(): poc failed"),
                     REJECT_INVALID, "poc-failed", true);;
@@ -3003,7 +3016,6 @@ bool CheckBlock(const CBlock& block, CValidationState& state, bool fCheckPOC, bo
     if (block.HasTx()) {
         // Size limits
         if (block.vtx.empty() || block.vtx.size() > MAX_TX_PER_BLOCK || ::GetSerializeSize(block, SER_NETWORK, PROTOCOL_VERSION) > dynParams.nMaxBlockSize) {
-            LogPrintf("TEST: %u/%u\n", ::GetSerializeSize(block, SER_NETWORK, PROTOCOL_VERSION), dynParams.nMaxBlockSize);
             return state.DoS(100, error("CheckBlock(): size limits failed"),
                              REJECT_INVALID, "bad-blk-length");
         }
@@ -4371,47 +4383,67 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                     }
                 }
             }
+            else if (inv.type == MSG_CVN_PUB_NONCE_POOL) {
+                CNoncePool *noncePool = NULL;
+                {
+                    LOCK(cs_mapRelayNonces);
+                    map<uint256, CNoncePool>::iterator mi = mapRelayNonces.find(inv.hash);
+                    if (mi != mapRelayNonces.end())
+                        noncePool = &(*mi).second;
+                }
+                if (noncePool)
+                    pfrom->PushMessage(NetMsgType::NONCEPOOL, *noncePool);
+                else
+                    vNotFound.push_back(inv);
+            }
+            else if (inv.type == MSG_CVN_SIGNATURE) {
+                CCvnPartialSignature *sig = NULL;
+                {
+                    LOCK(cs_mapRelaySigs);
+                    map<uint256, CCvnPartialSignature>::iterator mi = mapRelaySigs.find(inv.hash);
+                    if (mi != mapRelaySigs.end())
+                        sig = &(*mi).second;
+                }
+                if (sig)
+                    pfrom->PushMessage(NetMsgType::SIG, *sig);
+                else
+                    vNotFound.push_back(inv);
+            }
+            else if (inv.type == MSG_POC_CHAIN_DATA) {
+                CChainDataMsg *chainData = NULL;
+                {
+                    LOCK(cs_mapRelayChainData);
+                    map<uint256, CChainDataMsg>::iterator mi = mapRelayChainData.find(inv.hash);
+                    if (mi != mapRelayChainData.end()) {
+                        chainData = &(*mi).second;
+                    }
+                }
+                if (chainData)
+                    pfrom->PushMessage(NetMsgType::CHAINDATA, *chainData);
+                else
+                    vNotFound.push_back(inv);
+            }
             else if (inv.IsKnownType())
             {
+                CTransaction tx;
                 // Send stream from relay memory
-                bool pushed = false;
+                bool push = false;
                 {
                     LOCK(cs_mapRelay);
                     map<uint256, CTransaction>::iterator mi = mapRelay.find(inv.hash);
                     if (mi != mapRelay.end()) {
-                        pfrom->PushMessage(inv.GetCommand(), (*mi).second);
-                        pushed = true;
+                        tx = (*mi).second;
+                        push = true;
                     }
                 }
-                if (!pushed && inv.type == MSG_TX) {
-                    CTransaction tx;
+                if (!push && inv.type == MSG_TX) {
                     if (mempool.lookup(inv.hash, tx)) {
-                        pfrom->PushMessage(NetMsgType::TX, tx);
-                        pushed = true;
+                        push = true;
                     }
                 }
-                if (!pushed && inv.type == MSG_CVN_PUB_NONCE_POOL) {
-                    if (mapRelayNonces.count(inv.hash)) {
-                        CNoncePool msg = mapRelayNonces[inv.hash];
-                        pfrom->PushMessage(NetMsgType::NONCEPOOL, msg);
-                        pushed = true;
-                    }
-                }
-                if (!pushed && inv.type == MSG_CVN_SIGNATURE) {
-                    if (mapRelaySigs.count(inv.hash)) {
-                        CCvnPartialSignature msg = mapRelaySigs[inv.hash];
-                        pfrom->PushMessage(NetMsgType::SIG, msg);
-                        pushed = true;
-                    }
-                }
-                if (!pushed && inv.type == MSG_POC_CHAIN_DATA) {
-                    if (mapRelayChainData.count(inv.hash)) {
-                        CChainDataMsg msg = mapRelayChainData[inv.hash];
-                        pfrom->PushMessage(NetMsgType::CHAINDATA, msg);
-                        pushed = true;
-                    }
-                }
-                if (!pushed) {
+                if (push) {
+                    pfrom->PushMessage(inv.GetCommand(), tx);
+                } else {
                     vNotFound.push_back(inv);
                 }
             }
@@ -4441,11 +4473,17 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
 void static AdvertiseSigsAndNonces(CNode *pfrom)
 {
     CBlockIndex *tip = chainActive.Tip();
+    const uint256 hashPrevBlock = tip->GetBlockHash();
     uint32_t nNextCreator = CheckNextBlockCreator(tip, GetAdjustedTime());
 
     vector<CCvnPartialSignature> sigs;
-    if (sigHolder.GetSignatures(sigs, tip->GetBlockHash(), nNextCreator)) {
+    if (sigHolder.GetSignatures(sigs)) {
         BOOST_FOREACH(const CCvnPartialSignature &s, sigs) {
+            if (s.hashPrevBlock != hashPrevBlock || s.nCreatorId != nNextCreator) {
+                LogPrintf("AdvertiseSigsAndNonces : not sending outdated signature: 0x%08x vs 0x%08x, %s vs %s\n", s.nCreatorId, nNextCreator, s.hashPrevBlock.ToString(), hashPrevBlock.ToString());
+                continue;
+            }
+
             pfrom->PushInventory(CInv(MSG_CVN_SIGNATURE, s.GetHash()));
         }
     }
@@ -4540,8 +4578,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             pfrom->PushVersion();
 
         pfrom->fClient = !(pfrom->nServices & NODE_NETWORK);
-        //pfrom->fRelayCvnSig = !(pfrom->nServices & NODE_CVN_SIG) && !IsInitialBlockDownload();
-        pfrom->fRelayCvnSig = !IsInitialBlockDownload();
+        pfrom->fRelayPoCMessages = (pfrom->nServices & NODE_POC_DATA);
 
         // Potentially mark this peer as a preferred download peer.
         UpdatePreferredDownload(pfrom, State(pfrom->GetId()));
@@ -4629,7 +4666,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         pfrom->PushMessage(NetMsgType::SENDHEADERS);
 
         // Advertise the partial signatures and public nonces we've got
-        if (pfrom->fRelayCvnSig)
+        if (pfrom->fRelayPoCMessages)
             AdvertiseSigsAndNonces(pfrom);
     }
 
@@ -5929,14 +5966,24 @@ bool SendMessages(CNode* pto)
                     if (pto->filterInventoryKnown.contains(hash)) {
                         continue;
                     }
-                    if (pto->pfilter) {
-                        CTransaction tx;
-                        if (!mempool.lookup(hash, tx)) continue;
-                        if (!pto->pfilter->IsRelevantAndUpdate(tx)) continue;
-                    }
+                    CTransaction tx;
+                    if (!mempool.lookup(hash, tx)) continue;
+                    if (pto->pfilter && !pto->pfilter->IsRelevantAndUpdate(tx)) continue;
                     // Send
                     vInv.push_back(CInv(MSG_TX, hash));
                     nRelayedTransactions++;
+                    {
+                        LOCK(cs_mapRelay);
+                        // Expire old relay messages
+                        while (!vRelayExpiration.empty() && vRelayExpiration.front().first < GetTime()) {
+                            mapRelay.erase(vRelayExpiration.front().second);
+                            vRelayExpiration.pop_front();
+                        }
+                        bool ret = mapRelay.insert(std::make_pair(hash, tx)).second;
+                        if (ret) {
+                            vRelayExpiration.push_back(std::make_pair(GetTime() + 15 * 60, hash));
+                        }
+                    }
                     if (vInv.size() == MAX_INV_SZ) {
                         pto->PushMessage(NetMsgType::INV, vInv);
                         vInv.clear();
@@ -5951,12 +5998,32 @@ bool SendMessages(CNode* pto)
 
             const uint256& hashTip = chainActive.Tip()->GetBlockHash();
             BOOST_FOREACH(const uint256& hash, pto->vInventoryNoncePoolsToSend) {
-                if (mapRelayNonces.count(hash)) {
+                map<uint256, CNoncePool>::iterator mi = mapRelayNonces.find(hash);
+                if (mi != mapRelayNonces.end()) {
                     CInv inv(MSG_CVN_PUB_NONCE_POOL, hash);
-                    vInv.push_back(inv);
-                    if (vInv.size() == MAX_INV_SZ) {
-                        pto->PushMessage(NetMsgType::INV, vInv);
-                        vInv.clear();
+                    {
+                        LOCK(cs_mapRelayNonces);
+                        // Expire old relay messages
+                        while (!vRelayExpirationNonces.empty() && vRelayExpirationNonces.front().first < GetTime()) {
+                            mapRelayNonces.erase(vRelayExpirationNonces.front().second);
+                            vRelayExpirationNonces.pop_front();
+                        }
+
+                        // we keep them around for 5h so AlreadyHave() works properly
+                        vRelayExpirationNonces.push_back(std::make_pair(GetTime() + 18000, inv.hash));
+                    }
+
+                    const CNoncePool& p = mi->second;
+                    const uint32_t nPoolAge = GetPoolAge(p, chainActive.Tip());
+
+                    // we do not relay expired nonce pools
+                    if (nPoolAge < p.vPublicNonces.size()) {
+                        vInv.push_back(inv);
+
+                        if (vInv.size() == MAX_INV_SZ) {
+                            pto->PushMessage(NetMsgType::INV, vInv);
+                            vInv.clear();
+                        }
                     }
                 }
 
@@ -5969,12 +6036,25 @@ bool SendMessages(CNode* pto)
             //
 
             BOOST_FOREACH(const uint256& hash, pto->vInventoryChainSignaturesToSend) {
-                if (mapRelaySigs.count(hash)) {
-                    CCvnPartialSignature& msg = mapRelaySigs[hash];
+                map<uint256, CCvnPartialSignature>::iterator mi = mapRelaySigs.find(hash);
+                if (mi != mapRelaySigs.end()) {
+                    CInv inv(MSG_CVN_SIGNATURE, hash);
+                    {
+                        LOCK(cs_mapRelaySigs);
+                        // Expire old relay messages
+                        while (!vRelayExpirationSigs.empty() && vRelayExpirationSigs.front().first < GetTime()) {
+                            mapRelaySigs.erase(vRelayExpirationSigs.front().second);
+                            vRelayExpirationSigs.pop_front();
+                        }
+
+                        // we keep them around for 30min so AlreadyHave() works properly
+                        vRelayExpirationSigs.push_back(std::make_pair(GetTime() + 1800, inv.hash));
+                    }
+
+                    const CCvnPartialSignature& sig = mi->second;
 
                     // we only relay signatures for the active chain tip
-                    if (msg.hashPrevBlock == hashTip) {
-                        CInv inv(MSG_CVN_SIGNATURE, hash);
+                    if (sig.hashPrevBlock == hashTip) {
                         vInv.push_back(inv);
                         if (vInv.size() == MAX_INV_SZ) {
                             pto->PushMessage(NetMsgType::INV, vInv);
@@ -5990,12 +6070,24 @@ bool SendMessages(CNode* pto)
             // Handle: PoC chain data
             //
             BOOST_FOREACH(const uint256& hash, pto->vInventoryChainDataToSend) {
-                if (mapRelayChainData.count(hash)) {
-                    CChainDataMsg& msg = mapRelayChainData[hash];
+                map<uint256, CChainDataMsg>::iterator mi = mapRelayChainData.find(hash);
+                if (mi != mapRelayChainData.end()) {
+                    CInv inv(MSG_POC_CHAIN_DATA, hash);
+                    {
+                        LOCK(cs_mapRelayChainData);
+                        // Expire old relay messages
+                        while (!vRelayExpirationChainData.empty() && vRelayExpirationChainData.front().first < GetTime()) {
+                            mapRelayChainData.erase(vRelayExpirationChainData.front().second);
+                            vRelayExpirationChainData.pop_front();
+                        }
+
+                        vRelayExpirationChainData.push_back(std::make_pair(GetTime() + dynParams.nBlockSpacing, inv.hash));
+                    }
+
+                    const CChainDataMsg& chainData = mi->second;
 
                     // we only relay chain data for the active chain tip
-                    if (msg.hashPrevBlock == hashTip) {
-                        CInv inv(MSG_POC_CHAIN_DATA, hash);
+                    if (chainData.hashPrevBlock == hashTip) {
                         vInv.push_back(inv);
                         if (vInv.size() == MAX_INV_SZ) {
                             pto->PushMessage(NetMsgType::INV, vInv);
