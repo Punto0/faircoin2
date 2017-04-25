@@ -202,6 +202,7 @@ public:
     double dPingWait;
     double dPingMin;
     std::string addrLocal;
+    bool fRelayPoCMessages;
 };
 
 
@@ -331,6 +332,9 @@ public:
     int64_t nLastRecv;
     int64_t nTimeConnected;
     int64_t nTimeOffset;
+    // used to determine if a peer finished IBD
+    uint64_t nTimeSinceLastBlockSent;
+
     CAddress addr;
     std::string addrName;
     CService addrLocal;
@@ -397,6 +401,8 @@ public:
     std::vector<uint256> vInventoryBlockToSend;
     std::set<uint256> vInventoryNoncePoolsToSend;
     std::set<uint256> vInventoryChainSignaturesToSend;
+    std::set<uint256> vInventoryAdminNoncesToSend;
+    std::set<uint256> vInventoryAdminSignaturesToSend;
     std::set<uint256> vInventoryChainDataToSend;
     CCriticalSection cs_inventory;
     std::set<uint256> setAskFor;
@@ -527,6 +533,10 @@ public:
             vInventoryNoncePoolsToSend.insert(inv.hash);
         } else if (inv.type == MSG_CVN_SIGNATURE) {
             vInventoryChainSignaturesToSend.insert(inv.hash);
+        } else if (inv.type == MSG_CHAIN_ADMIN_NONCE) {
+            vInventoryAdminNoncesToSend.insert(inv.hash);
+        } else if (inv.type == MSG_CHAIN_ADMIN_SIGNATURE) {
+            vInventoryAdminSignaturesToSend.insert(inv.hash);
         } else if (inv.type == MSG_POC_CHAIN_DATA) {
             vInventoryChainDataToSend.insert(inv.hash);
         }

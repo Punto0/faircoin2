@@ -2,8 +2,6 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "rpcserver.h"
-
 #include "chainparams.h"
 #include "clientversion.h"
 #include "main.h"
@@ -20,6 +18,7 @@
 #include <boost/foreach.hpp>
 
 #include <univalue.h>
+#include "server.h"
 
 using namespace std;
 
@@ -91,6 +90,7 @@ UniValue getpeerinfo(const UniValue& params, bool fHelp)
             "    \"addrlocal\":\"ip:port\",   (string) local address\n"
             "    \"services\":\"xxxxxxxxxxxxxxxx\",   (string) The services offered\n"
             "    \"relaytxes\":true|false,    (boolean) Whether peer has asked us to relay transactions to it\n"
+            "    \"fRelayPoCMessages\":true|false, (boolean) Whether we relay PoC messages to that peer\n"
             "    \"lastsend\": ttt,           (numeric) The time in seconds since epoch (Jan 1 1970 GMT) of the last send\n"
             "    \"lastrecv\": ttt,           (numeric) The time in seconds since epoch (Jan 1 1970 GMT) of the last receive\n"
             "    \"bytessent\": n,            (numeric) The total bytes sent\n"
@@ -136,6 +136,7 @@ UniValue getpeerinfo(const UniValue& params, bool fHelp)
             obj.push_back(Pair("addrlocal", stats.addrLocal));
         obj.push_back(Pair("services", strprintf("%016x", stats.nServices)));
         obj.push_back(Pair("relaytxes", stats.fRelayTxes));
+        obj.push_back(Pair("fRelayPoCMessages", stats.fRelayPoCMessages));
         obj.push_back(Pair("lastsend", stats.nLastSend));
         obj.push_back(Pair("lastrecv", stats.nLastRecv));
         obj.push_back(Pair("bytessent", stats.nSendBytes));

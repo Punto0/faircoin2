@@ -23,7 +23,7 @@
 #include "blockfactory.h"
 #include "net.h"
 #include "policy/policy.h"
-#include "rpcserver.h"
+#include "rpc/server.h"
 #include "script/standard.h"
 #include "script/sigcache.h"
 #include "scheduler.h"
@@ -339,7 +339,7 @@ std::string HelpMessage(HelpMessageMode mode)
     strUsage += HelpMessageOpt("-conf=<file>", strprintf(_("Specify configuration file (default: %s)"), BITCOIN_CONF_FILENAME));
     if (mode == HMM_BITCOIND)
     {
-#ifndef WIN32
+#if HAVE_DECL_DAEMON
         strUsage += HelpMessageOpt("-daemon", _("Run in the background as a daemon and accept commands"));
 #endif
     }
@@ -481,6 +481,7 @@ std::string HelpMessage(HelpMessageMode mode)
         strUsage += HelpMessageOpt("-limitfreerelay=<n>", strprintf("Continuously rate-limit free transactions to <n>*1000 bytes per minute (default: %u)", DEFAULT_LIMITFREERELAY));
         strUsage += HelpMessageOpt("-relaypriority", strprintf("Require high priority for relaying free or low-fee transactions (default: %u)", DEFAULT_RELAYPRIORITY));
         strUsage += HelpMessageOpt("-maxsigcachesize=<n>", strprintf("Limit size of signature cache to <n> MiB (default: %u)", DEFAULT_MAX_SIG_CACHE_SIZE));
+        strUsage += HelpMessageOpt("-maxtipage=<n>", strprintf("Maximum tip age in seconds to consider node in initial block download (default: %u)", DEFAULT_MAX_TIP_AGE));
     }
     strUsage += HelpMessageOpt("-minrelaytxfee=<amt>", strprintf(_("Fees (in %s/kB) smaller than this are considered zero fee for relaying, mining and transaction creation (default: %s)"),
         CURRENCY_UNIT, FormatMoney(DEFAULT_MIN_RELAY_TX_FEE)));
@@ -809,7 +810,7 @@ void InitLogging()
 /** Initialize bitcoin.
  *  @pre Parameters should be parsed and config file should be read.
  */
-bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
+bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const string &strFasitoPassword)
 {
     // ********************************************************* Step 1: setup
 #ifdef _MSC_VER
@@ -1062,6 +1063,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         boost::split(vstrReplacementModes, strReplacementModeList, boost::is_any_of(","));
         fEnableReplacement = (std::find(vstrReplacementModes.begin(), vstrReplacementModes.end(), "fee") != vstrReplacementModes.end());
     }
+    nMaxTipAge = GetArg("-maxtipage", DEFAULT_MAX_TIP_AGE);
 
     // ********************************************************* Step 4: application initialization: dir lock, daemonize, pidfile, debug log, CVN
 
@@ -1113,37 +1115,17 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     LogPrintf("Using at most %i connections (%i file descriptors available)\n", nMaxConnections, nFD);
     std::ostringstream strErrors;
 
-    if (mapArgs.count("-admin")) {
-        if (GetArg("-admin", "") == "fasito") {
-#ifdef USE_FASITO
-            LogPrintf("Initializing fasito\n");
-            uiInterface.InitMessage(_("Initializing fasito..."));
-            nChainAdminId = InitChainAdminWithFasito();
-#else
-            LogPrintf("ERROR: invalid parameter -cvn=fasito. This wallet version was not compiled with fasito support\n");
-#endif
-        } else if (GetArg("-admin", "") == "file") {
-            nChainAdminId = InitChainAdminWithCertificate();
-        } else
-            return InitError("-admin configuration invalid. Parameter must be 'fasito' or 'file'\n");
-
-        if (!nChainAdminId)
-            return InitError("could not find a vaild chain admin ID\n");
-
-        LogPrintf("Configuring node with chain admin ID 0x%08x\n", nChainAdminId);
-    }
-
     if (mapArgs.count("-cvn")) {
         if (GetArg("-cvn", "") == "fasito") {
 #ifdef USE_FASITO
             LogPrintf("Initializing fasito\n");
             uiInterface.InitMessage(_("Initializing fasito..."));
-            nCvnNodeId = InitCVNWithFasito();
+            nCvnNodeId = InitCVNWithFasito(strFasitoPassword);
 #else
             LogPrintf("ERROR: invalid parameter -cvn=fasito. This wallet version was not compiled with fasito support\n");
 #endif
         } else if (GetArg("-cvn", "") == "file") {
-            nCvnNodeId = InitCVNWithCertificate();
+            nCvnNodeId = InitCVNWithCertificate(strFasitoPassword);
         } else
             return InitError("-cvn configuration invalid. Parameter must be 'fasito' or 'file'\n");
 
@@ -1152,30 +1134,30 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
 
         LogPrintf("Starting CVN node with ID 0x%08x\n", nCvnNodeId);
         uiInterface.InitMessage(_("Starting CVN node..."));
+    }
 
 #if 0
-        CBlock genesis = chainparams.GenesisBlock();
-        UpdateCvnInfo(&genesis, 0);
-        UpdateChainAdmins(&genesis);
+    CBlock genesis = chainparams.GenesisBlock();
+    UpdateCvnInfo(&genesis, 0);
+    UpdateChainAdmins(&genesis);
 
-        CSchnorrSig chainAdminSig;
-        if (!adminPrivKey.SchnorrSign(genesis.GetPayloadHash(true), chainAdminSig))
-            return InitError("could not create chain admin signature");
+    CSchnorrSig chainAdminSig;
+    if (!adminPrivKey.SchnorrSign(genesis.GetPayloadHash(true), chainAdminSig))
+        return InitError("could not create chain admin signature");
 
-        LogPrintf("Genesis admin data signature  : %s\n", chainAdminSig.ToString());
-        if (!CPubKey::VerifySchnorr(genesis.GetPayloadHash(true), chainAdminSig, adminPubKey)) {
-            return InitError("could not verify chain admin signature");
-        }
-
-        CCvnPartialSignature chainSig;
-        vector<uint32_t> vMissingSignatures;
-        CvnSignPartial(genesis.hashPrevBlock, chainSig, GENESIS_NODE_ID, GENESIS_NODE_ID, vMissingSignatures);
-        LogPrintf("Genesis chain signature       : %s\n", chainSig.signature.ToString());
-
-        CvnSignBlock(genesis);
-        LogPrintf("Genesis block signature       : %s\n", genesis.creatorSignature.ToString());
-#endif
+    LogPrintf("Genesis admin data signature  : %s\n", chainAdminSig.ToString());
+    if (!CPubKey::VerifySchnorr(genesis.GetPayloadHash(true), chainAdminSig, adminPubKey)) {
+        return InitError("could not verify chain admin signature");
     }
+
+    CCvnPartialSignature chainSig;
+    vector<uint32_t> vMissingSignatures;
+    CvnSignPartial(genesis.hashPrevBlock, chainSig, GENESIS_NODE_ID, GENESIS_NODE_ID, vMissingSignatures);
+    LogPrintf("Genesis chain signature       : %s\n", chainSig.signature.ToString());
+
+    CvnSignBlock(genesis);
+    LogPrintf("Genesis block signature       : %s\n", genesis.creatorSignature.ToString());
+#endif
 
     LogPrintf("Using %u threads for script verification\n", nScriptCheckThreads);
     if (nScriptCheckThreads) {

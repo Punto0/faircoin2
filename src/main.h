@@ -104,6 +104,8 @@ static const int64_t BLOCK_DOWNLOAD_TIMEOUT_BASE = 1000000;
 /** Additional block download timeout per parallel downloading peer (i.e. 5 min) */
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT_PER_PEER = 500000;
 
+static const int64_t DEFAULT_MAX_TIP_AGE = 30 * 60;
+
 static const unsigned int DEFAULT_LIMITFREERELAY = 15;
 static const bool DEFAULT_RELAYPRIORITY = true;
 
@@ -149,6 +151,7 @@ extern size_t nCoinCacheUsage;
 extern CFeeRate minRelayTxFee;
 extern bool fAlerts;
 extern bool fEnableReplacement;
+extern int64_t nMaxTipAge;
 
 extern map<uint256, CNoncePool> mapRelayNonces;
 extern CCriticalSection cs_mapRelayNonces;
@@ -156,7 +159,10 @@ extern map<uint256, CCvnPartialSignature> mapRelaySigs;
 extern CCriticalSection cs_mapRelaySigs;
 extern map<uint256, CChainDataMsg> mapRelayChainData;
 extern CCriticalSection cs_mapRelayChainData;
-
+extern map<uint256, CAdminNonce> mapRelayAdminNonces;
+extern CCriticalSection cs_mapRelayAdminNonces;
+extern map<uint256, CAdminPartialSignature> mapRelayAdminSigs;
+extern CCriticalSection cs_mapRelayAdminSigs;
 
 /** Best header we've seen so far (used for getheaders queries' starting points). */
 extern CBlockIndex *pindexBestHeader;

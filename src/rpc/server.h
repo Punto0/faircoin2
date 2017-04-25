@@ -7,7 +7,6 @@
 #define BITCOIN_RPCSERVER_H
 
 #include "amount.h"
-#include "rpcprotocol.h"
 #include "uint256.h"
 
 #include <list>
@@ -18,6 +17,7 @@
 #include <boost/function.hpp>
 
 #include <univalue.h>
+#include "protocol.h"
 
 class CRPCCommand;
 
@@ -164,7 +164,7 @@ extern std::string HelpExampleRpc(const std::string& methodname, const std::stri
 
 extern void EnsureWalletIsUnlocked();
 
-extern UniValue getconnectioncount(const UniValue& params, bool fHelp); // in rpcnet.cpp
+extern UniValue getconnectioncount(const UniValue& params, bool fHelp); // in rpc/net.cpp
 extern UniValue getpeerinfo(const UniValue& params, bool fHelp);
 extern UniValue ping(const UniValue& params, bool fHelp);
 extern UniValue addnode(const UniValue& params, bool fHelp);
@@ -175,15 +175,19 @@ extern UniValue setban(const UniValue& params, bool fHelp);
 extern UniValue listbanned(const UniValue& params, bool fHelp);
 extern UniValue clearbanned(const UniValue& params, bool fHelp);
 
-extern UniValue dumpprivkey(const UniValue& params, bool fHelp); // in rpcdump.cpp
+extern UniValue dumpprivkey(const UniValue& params, bool fHelp); // in rpc/dump.cpp
 extern UniValue importprivkey(const UniValue& params, bool fHelp);
 extern UniValue importaddress(const UniValue& params, bool fHelp);
 extern UniValue importpubkey(const UniValue& params, bool fHelp);
 extern UniValue dumpwallet(const UniValue& params, bool fHelp);
 extern UniValue importwallet(const UniValue& params, bool fHelp);
 
-extern UniValue getgenerate(const UniValue& params, bool fHelp); // in rpccvn.cpp
+extern UniValue getgenerate(const UniValue& params, bool fHelp); // in rpc/cvn.cpp
 extern UniValue setgenerate(const UniValue& params, bool fHelp);
+extern UniValue chainadminlogin(const UniValue& params, bool fHelp);
+extern UniValue chainadminlogout(const UniValue& params, bool fHelp);
+extern UniValue chainadminnonce(const UniValue& params, bool fHelp);
+extern UniValue chainadminsign(const UniValue& params, bool fHelp);
 extern UniValue addcvn(const UniValue& params, bool fHelp);
 extern UniValue removecvn(const UniValue& params, bool fHelp);
 extern UniValue signchaindata(const UniValue& params, bool fHelp);
@@ -192,6 +196,7 @@ extern UniValue bancvn(const UniValue& params, bool fHelp);
 extern UniValue getchainparameters(const UniValue& params, bool fHelp);
 extern UniValue setchainparameters(const UniValue& params, bool fHelp);
 extern UniValue getactivecvns(const UniValue& params, bool fHelp);
+extern UniValue getactiveadmins(const UniValue& params, bool fHelp);
 extern UniValue submitblock(const UniValue& params, bool fHelp);
 #ifdef ENABLE_COINSUPPLY
 extern UniValue addcoinsupply(const UniValue& params, bool fHelp);
@@ -239,7 +244,7 @@ extern UniValue getnetworkinfo(const UniValue& params, bool fHelp);
 extern UniValue setmocktime(const UniValue& params, bool fHelp);
 extern UniValue resendwallettransactions(const UniValue& params, bool fHelp);
 
-extern UniValue getrawtransaction(const UniValue& params, bool fHelp); // in rcprawtransaction.cpp
+extern UniValue getrawtransaction(const UniValue& params, bool fHelp); // in rcp/rawtransaction.cpp
 extern UniValue listunspent(const UniValue& params, bool fHelp);
 extern UniValue lockunspent(const UniValue& params, bool fHelp);
 extern UniValue listlockunspent(const UniValue& params, bool fHelp);
@@ -252,7 +257,7 @@ extern UniValue sendrawtransaction(const UniValue& params, bool fHelp);
 extern UniValue gettxoutproof(const UniValue& params, bool fHelp);
 extern UniValue verifytxoutproof(const UniValue& params, bool fHelp);
 
-extern UniValue getblockcount(const UniValue& params, bool fHelp); // in rpcblockchain.cpp
+extern UniValue getblockcount(const UniValue& params, bool fHelp); // in rpc/blockchain.cpp
 extern UniValue getbestblockhash(const UniValue& params, bool fHelp);
 extern UniValue settxfee(const UniValue& params, bool fHelp);
 extern UniValue getmempoolinfo(const UniValue& params, bool fHelp);

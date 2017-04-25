@@ -5,14 +5,15 @@
 
 #include "chainparams.h"
 #include "clientversion.h"
-#include "rpcserver.h"
+#include "compat.h"
+#include "rpc/server.h"
 #include "init.h"
 #include "noui.h"
 #include "scheduler.h"
 #include "util.h"
 #include "httpserver.h"
 #include "httprpc.h"
-#include "rpcserver.h"
+#include "rpc/server.h"
 
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem.hpp>
@@ -35,8 +36,6 @@
  * \section Navigation
  * Use the buttons <code>Namespaces</code>, <code>Classes</code> or <code>Files</code> at the top of the page to start navigating the code.
  */
-
-static bool fDaemon;
 
 void WaitForShutdown(boost::thread_group* threadGroup)
 {
@@ -125,36 +124,36 @@ bool AppInit(int argc, char* argv[])
             fprintf(stderr, "Error: There is no RPC client functionality in faircoind anymore. Use the faircoin-cli utility instead.\n");
             exit(1);
         }
-#ifndef WIN32
-        fDaemon = GetBoolArg("-daemon", false);
-        if (fDaemon)
+
+        // we need to do this early, just before daemonsing...
+        string strFasitoPassword = "";
+        if (mapArgs.count("-cvn"))
         {
+            promptForPassword("Enter Fasito PIN: ", strFasitoPassword);
+        }
+
+        if (GetBoolArg("-daemon", false))
+        {
+#if HAVE_DECL_DAEMON
             fprintf(stdout, "FairCoin server starting\n");
 
             // Daemonize
-            pid_t pid = fork();
-            if (pid < 0)
-            {
-                fprintf(stderr, "Error: fork() returned %d errno %d\n", pid, errno);
+            if (daemon(1, 0)) { // don't chdir (1), do close FDs (0)
+                fprintf(stderr, "Error: daemon() failed: %s\n", strerror(errno));
                 return false;
             }
-            if (pid > 0) // Parent process, pid is child process id
-            {
-                return true;
-            }
-            // Child process falls through to rest of initialization
-
-            pid_t sid = setsid();
-            if (sid < 0)
-                fprintf(stderr, "Error: setsid() returned %d errno %d\n", sid, errno);
+#else
+            fprintf(stderr, "Error: -daemon is not supported on this operating system\n");
+            return false;
+#endif // HAVE_DECL_DAEMON
         }
-#endif
         SoftSetBoolArg("-server", true);
 
         // Set this early so that parameter interactions go to console
         InitLogging();
         InitParameterInteraction();
-        fRet = AppInit2(threadGroup, scheduler);
+        fRet = AppInit2(threadGroup, scheduler, strFasitoPassword);
+        memset(&strFasitoPassword.begin()[0], 0, strFasitoPassword.length());
     }
     catch (const std::exception& e) {
         PrintExceptionContinue(&e, "AppInit()");
