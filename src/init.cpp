@@ -1142,7 +1142,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
 #endif // USE_CVN
     }
 
-#if 0
+#if SHOW_GENESIS_HASHES
     CBlock genesisBlock = chainparams.GenesisBlock();
     UpdateCvnInfo(&genesisBlock, 0);
     UpdateChainAdmins(&genesisBlock);

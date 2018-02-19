@@ -20,7 +20,7 @@
 
 CDynamicChainParams dynParams;
 
-#define SHOW_GENESIS_HASHES 0
+// #define SHOW_GENESIS_HASHES 0
 
 #if SHOW_GENESIS_HASHES
 #define PRINT_HASHES \
@@ -34,8 +34,8 @@ CDynamicChainParams dynParams;
             genesis.hashPayload.ToString().c_str())
 #endif
 
-#define GENESIS_BLOCK_TIMESTAMP 1500364800
-const char* genesisMessage = "FairCoin - the currency for a fair economy.";
+#define GENESIS_BLOCK_TIMESTAMP 1518996845
+const char* genesisMessage = "Nac Mac Feegle! The Wee Free Men! Nae king! Nae quin! Nae laird! Nae master! We willna' be fooled again!";
 
 static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nCreatorId, const CDynamicChainParams& dynamicChainParams)
 {
@@ -189,15 +189,15 @@ public:
         genesis = CreateGenesisBlock(GENESIS_BLOCK_TIMESTAMP + 1, GENESIS_NODE_ID, dynParams);
 
         genesis.vCvns.resize(1);
-        genesis.vCvns[0] = CCvnInfo(GENESIS_NODE_ID, 0, CSchnorrPubKeyDER("04f69bd29a5e2b8d0f5c185fcc421d11556c071788de07d3d194ded04721afaa652ad75a649a0dac8f576e484392af68f5c31ab0ef5e3432baf8b14b6ad8b1262c"));
+        genesis.vCvns[0] = CCvnInfo(GENESIS_NODE_ID, 0, CSchnorrPubKeyDER("04daaaf1c211a2ae2bf8e55a0c049fce282b275d6ea79a64718d89e19f295d051afc841b786343a6881cb703a291924803638190fd18a4ad309156a2a834ef630c"));
 
         genesis.vChainAdmins.resize(1);
-        genesis.vChainAdmins[0] = CChainAdmin(GENESIS_ADMIN_ID, 0, CSchnorrPubKeyDER("041cbfa5cb7dbe6387c0808264feb7adc9d99a003da4922e839a548955307f3d365f9fe6fa76767e848660ec864c9f3075fdcdf3e3755af9e3c2662004979ff580"));
+        genesis.vChainAdmins[0] = CChainAdmin(GENESIS_ADMIN_ID, 0, CSchnorrPubKeyDER("04fed0dd1401db92b3df4250047ad6329f19efc5a42aa377e811a61e0e6e49c2c161b0b2afd9dea21d140fdad61f7410e6863d8e4ee62d943d34dd8e9cfa434e35"));
 
-        genesis.chainMultiSig = CSchnorrSigS("14dc4f77f9d59ece2b3aa02cc4df99954d47fa2719be207d1b5010745aec419e451f01a8749cd16f22a727d0deba5110d2ce7e44ff86f0efdea58db4efdb92cd");
+        genesis.chainMultiSig = CSchnorrSigS("1c16277c21faead397d7bb096fb65b820c6bf0ce7f6083de5e59909846862991bf1f3a7fd5c32677d756cdff6cdaf31017b408031927d093efd6f28c44732f5e");
         genesis.vAdminIds.push_back(GENESIS_ADMIN_ID);
-        genesis.adminMultiSig = CSchnorrSigS("0c9cce30058d3a2e8e154d6bf9ab6ae94098a4e2d539bf27f0236e26dee86d1e9a37df700bdd4b991310046b069b0b84ce62371f6c8ab8949e19831d4b071231");
-        genesis.creatorSignature = CSchnorrSigS("377599b4021c3e35a40667466734d2d1a3a1ef94cf52e1f5a6863af180ed7258982869d956ff34251ef4e13d7fd341a68c3e47007b5cbc0c67860a8956df9e71");
+        genesis.adminMultiSig = CSchnorrSigS("0c764cca17500d8fa7fcc3ec91c03814bd114da48bad1423ee8fdb5f845b0ba08fda72c2b1c71a5598a8b0bb269097b922d43cbafeee4b8962628dcef4dbeeb3");
+        genesis.creatorSignature = CSchnorrSigS("49c95dfbb749d1ee9610a36eca94d1ceb3da221fc72dcd6e0e0ba7a52446da6c319be3b417ab528dd0dca830f5a6891000bb4542bc813a1a6610b6b4aefb81f4");
 
         genesis.hashMerkleRoot = BlockMerkleRoot(genesis);
         genesis.hashPayload    = genesis.GetPayloadHash();
@@ -206,13 +206,13 @@ public:
 #if SHOW_GENESIS_HASHES
         PRINT_HASHES;
 #else
-        assert(consensus.hashGenesisBlock == uint256S("42327d5edf3cbb75bb139ec78bd62e517f14d7cbad451e4778741b6b4c1dfbc6"));
-        assert(genesis.hashMerkleRoot == uint256S("7c27ade2c28e67ed3077f8f77b8ea6d36d4f5eba04c099be3c9faa9a4a04c046"));
-        assert(genesis.hashPayload == uint256S("1c4ed40a950abbd27f4cd57e1ccb6613a956ce9edb16210cd5acb12f708389f3"));
+        assert(consensus.hashGenesisBlock == uint256S("ffebe97ec271df624a1ce5421ce28fd8245976ea4482998332d00e35b9ef05ad"));
+        assert(genesis.hashMerkleRoot == uint256S("cd3056c33fd3593eb3e7a6f804c62a0e88aec9c3bc1fde7027dca39ee860b15f"));
+        assert(genesis.hashPayload == uint256S("6dced8fd68a73430a36a386d6b89447fc2113d0bb3c6212569e05f0e47e2e5dd"));
 #endif
         vFixedSeeds.clear();
         vSeeds.clear();
-        vSeeds.push_back(CDNSSeedData("1.fair-coin.org", "faircoin2-testnet-seed1.fair-coin.org")); // Thomas König
+        // vSeeds.push_back(CDNSSeedData("1.fair-coin.org", "faircoin2-testnet-seed1.fair-coin.org")); // Thomas König
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,111);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,196);
