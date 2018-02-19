@@ -1156,11 +1156,13 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
 
     CSchnorrSig chainAdminSig;
     if (!adminPrivKey.SchnorrSign(genesisBlock.GetPayloadHash(true), chainAdminSig))
-        return InitError("could not create chain admin signature");
+        // return InitError("could not create chain admin signature");
+        LogPrintf("could not create chain admin signature");
 
     LogPrintf("Genesis adminMultiSig    : %s\n", chainAdminSig.ToString());
     if (!CPubKey::VerifySchnorr(genesisBlock.GetPayloadHash(true), chainAdminSig, adminPubKey)) {
-        return InitError("could not verify chain admin signature");
+        // return InitError("could not verify chain admin signature");
+        LogPrintf("could not verify chain admin signature");
     }
 
     CvnSignBlock(genesisBlock);
