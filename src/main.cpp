@@ -1415,7 +1415,7 @@ bool IsInitialBlockDownload()
     // Optimization: pre-test latch before taking the lock.
     if (latchToFalse.load(std::memory_order_relaxed))
         return false;
-#if START_CHAIN:
+#if START_CHAIN
     LogPrintf("Starting blockchian, no download blocks.\n");
     latchToFalse.store(true, std::memory_order_relaxed);
     return false;
