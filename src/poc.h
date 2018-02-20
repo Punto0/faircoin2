@@ -16,8 +16,8 @@
 #include <boost/filesystem.hpp>
 #include <secp256k1.h>
 
-#define GENESIS_NODE_ID  0xbebebe
-#define GENESIS_ADMIN_ID 0xbababa
+#define GENESIS_NODE_ID  0xbebebebe
+#define GENESIS_ADMIN_ID 0xadadadad
 
 /** dynamic chain parameters range checks */
 #define MAX_BLOCK_SPACING 3600

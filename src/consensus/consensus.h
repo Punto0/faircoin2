@@ -16,10 +16,10 @@ static const unsigned int MAX_TX_PER_BLOCK = 20000;
 #define COINBASE_MATURITY (dynParams.nCoinbaseMaturity)
 
 /** The maximum allowed number if active CVNs */
-static const unsigned int MAX_NUMBER_OF_CVNS = 100;
+static const unsigned int MAX_NUMBER_OF_CVNS = 1000;
 
 /** The maximum allowed number if active chain admins */
-static const unsigned int MAX_NUMBER_OF_CHAIN_ADMINS = 11;
+static const unsigned int MAX_NUMBER_OF_CHAIN_ADMINS = 1000;
 
 /** Flags for LockTime() */
 enum {
