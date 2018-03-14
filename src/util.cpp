@@ -17,7 +17,9 @@
 #include "utiltime.h"
 
 #include <stdarg.h>
+#ifdef USE_CVN
 #include <termios.h>
+#endif // USE_CVN
 
 #if (defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__))
 #include <pthread.h>
@@ -480,6 +482,29 @@ boost::filesystem::path GetDefaultDataDir()
 #endif
 }
 
+boost::filesystem::path GetDefaultDataDirFC1()
+{
+    namespace fs = boost::filesystem;
+#ifdef WIN32
+    // Windows
+    return GetSpecialFolderPath(CSIDL_APPDATA) / "FairCoin";
+#else
+    fs::path pathRet;
+    char* pszHome = getenv("HOME");
+    if (pszHome == NULL || strlen(pszHome) == 0)
+        pathRet = fs::path("/");
+    else
+        pathRet = fs::path(pszHome);
+#ifdef MAC_OSX
+    // Mac
+    return pathRet / "Library/Application Support/FairCoin";
+#else
+    // Unix
+    return pathRet / ".FairCoin";
+#endif
+#endif
+}
+
 static boost::filesystem::path pathCached;
 static boost::filesystem::path pathCachedNetSpecific;
 static CCriticalSection csPathCached;
@@ -835,6 +860,7 @@ int GetNumCores()
 #endif
 }
 
+#ifdef USE_CVN
 void promptForPassword(const std::string &strPrompt, std::string &strPassword)
 {
     cout << strPrompt;
@@ -850,3 +876,4 @@ void promptForPassword(const std::string &strPrompt, std::string &strPassword)
     tcsetattr(STDIN_FILENO, TCSANOW, &t);
     cout << "\n";
 }
+#endif // USE_CVN

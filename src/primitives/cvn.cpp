@@ -25,7 +25,7 @@ std::string CDynamicChainParams::ToString() const
     std::stringstream s;
         s << strprintf("CDynamicChainParams(ver=%d, minAdminSigs=%u, maxAdminSigs=%u, blockSpacing=%u, blockSpacingGracePeriod=%u, "
                        "transactionFee=%u, dustThreshold=%u, minSuccessiveSignatures=%u, nBlocksToConsiderForSigCheck=%u, nPercentageOfSignaturesMean=%u, nMaxBlockSize=%u, "
-                       "blockPropagationWaitTime=%u, retryNewSigSetInterval=%u, description='%s')",
+                       "blockPropagationWaitTime=%u, retryNewSigSetInterval=%u, nCoinbaseMaturity=%u, description='%s')",
             nVersion,
             nMinAdminSigs, nMaxAdminSigs,
             nBlockSpacing, nBlockSpacingGracePeriod,
@@ -33,7 +33,7 @@ std::string CDynamicChainParams::ToString() const
             nMinSuccessiveSignatures, nBlocksToConsiderForSigCheck,
             nPercentageOfSignaturesMean, nMaxBlockSize,
             nBlockPropagationWaitTime, nRetryNewSigSetInterval,
-            strDescription
+            nCoinbaseMaturity, strDescription
         );
     return s.str();
 }
@@ -46,9 +46,11 @@ uint256 CCoinSupply::GetHash() const
 std::string CCoinSupply::ToString() const
 {
     std::stringstream s;
-        s << strprintf("CCoinSupply(ver=%d, nValue=%d.%08d, rawScriptDestination=%s, asm=%s)",
+        s << strprintf("CCoinSupply(ver=%d, nValue=%d.%08d, isFinal=%s, description='%s', rawScriptDestination=%s, asm=%s)",
             nVersion,
             nValue / COIN, nValue % COIN,
+            fFinalCoinsSupply ? "true" : "false",
+            strDescription,
             HexStr(scriptDestination),
             ScriptToAsmStr(scriptDestination)
         );
@@ -143,10 +145,8 @@ uint256 CChainDataMsg::GetHash() const
         hasher << dynamicChainParams;
     if (HasChainAdmins())
         hasher << vChainAdmins;
-#ifdef ENABLE_COINSUPPLY
     if (HasCoinSupplyPayload())
         hasher << coinSupply;
-#endif
     return hasher.GetHash();
 }
 

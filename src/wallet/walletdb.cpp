@@ -734,7 +734,7 @@ DBErrors CWalletDB::LoadWallet(CWallet* pwallet)
     return result;
 }
 
-DBErrors CWalletDB::FindWalletTx(CWallet* pwallet, vector<uint256>& vTxHash, vector<CWalletTx>& vWtx)
+DBErrors CWalletDB::FindWalletTx(CWallet* pwallet, vector<uint256>& vTxHash, vector<CWalletTx>& vWtx, const bool fOldPoSWallet)
 {
     pwallet->vchDefaultKey = CPubKey();
     bool fNoncriticalErrors = false;
@@ -778,11 +778,20 @@ DBErrors CWalletDB::FindWalletTx(CWallet* pwallet, vector<uint256>& vTxHash, vec
                 uint256 hash;
                 ssKey >> hash;
 
-                CWalletTx wtx;
-                ssValue >> wtx;
+                if (fOldPoSWallet) { // for FairCoin1 wallet migration
+                    CWalletTxFC1 wtx;
+                    ssValue >> wtx;
+                } else {
+                    /* do not de-serialise possibly corrupt walletTxs
+                     * when stripping them */
+                    if (GetArg("-zapwallettxes", "1") != "2") {
+                        CWalletTx wtx;
+                        ssValue >> wtx;
+                        vWtx.push_back(wtx);
+                    }
+                }
 
                 vTxHash.push_back(hash);
-                vWtx.push_back(wtx);
             }
         }
         pcursor->close();
@@ -802,9 +811,16 @@ DBErrors CWalletDB::FindWalletTx(CWallet* pwallet, vector<uint256>& vTxHash, vec
 
 DBErrors CWalletDB::ZapWalletTx(CWallet* pwallet, vector<CWalletTx>& vWtx)
 {
+    bool fOldPoSWallet = false;
+    int nVersion = 0;
+    if (Read((string)"version", nVersion) && nVersion < 1100000 && GetBoolArg("-fc1walletupgrade", true)) {
+        LogPrintf("FairCoin1 wallet detected activating upgrade mode.\n");
+        fOldPoSWallet = true;
+    }
+
     // build list of wallet TXs
     vector<uint256> vTxHash;
-    DBErrors err = FindWalletTx(pwallet, vTxHash, vWtx);
+    DBErrors err = FindWalletTx(pwallet, vTxHash, vWtx, fOldPoSWallet);
     if (err != DB_LOAD_OK)
         return err;
 

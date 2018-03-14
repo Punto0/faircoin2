@@ -100,7 +100,7 @@ public:
 
 class CSchnorrRx : public poc_storage<32> {
 public:
-    CSchnorrRx() {}
+    CSchnorrRx() { }
     CSchnorrRx(const poc_storage<32>& b) : poc_storage<32>(b) {}
     explicit CSchnorrRx(const std::vector<unsigned char>& vch) : poc_storage<32>(vch) {}
 };
@@ -167,8 +167,10 @@ inline CSchnorrPubKey CSchnorrPubKeyDER(const std::string& str)
     CSchnorrPubKey rv;
 
     if (str.length() != 65 * 2 || (str[0] != '0' && str[1] != '4'))
-        return NULL;
-    rv.SetHexDER(str);
+        rv.SetNull();
+    else
+        rv.SetHexDER(str);
+
     return rv;
 }
 
@@ -397,6 +399,9 @@ public:
      ** nRetryNewSigSetInterval sec. to create a new set without the CVN IDs that were missing*/
     uint32_t nRetryNewSigSetInterval;
 
+    /** Coinbase transaction outputs can only be spent after this number of new blocks */
+    uint32_t nCoinbaseMaturity;
+
     /** A short description of the changes
      * A description string should be built like this:
      * #nnnnn <URI to a document where the decision is documented> <text that describes the change> */
@@ -425,6 +430,7 @@ public:
         READWRITE(nMaxBlockSize);
         READWRITE(nBlockPropagationWaitTime);
         READWRITE(nRetryNewSigSetInterval);
+        READWRITE(nCoinbaseMaturity);
         READWRITE(strDescription);
     }
 
@@ -443,6 +449,7 @@ public:
         nMaxBlockSize = 0;
         nBlockPropagationWaitTime = 0;
         nRetryNewSigSetInterval = 0;
+        nCoinbaseMaturity = 0;
         strDescription = "";
     }
 
@@ -457,7 +464,13 @@ public:
     static const uint32_t CURRENT_VERSION = 1;
     uint32_t nVersion;
     CAmount nValue;
+    bool fFinalCoinsSupply;
     CScript scriptDestination;
+
+    /** A short description of the changes
+     * A description string should be built like this:
+     * #nnnnn <URI to a document where the decision is documented> <text that describes the change> */
+    string strDescription;
 
     CCoinSupply()
     {
@@ -471,6 +484,8 @@ public:
         READWRITE(this->nVersion);
         nVersion = this->nVersion;
         READWRITE(nValue);
+        READWRITE(fFinalCoinsSupply);
+        READWRITE(strDescription);
         READWRITE(*(CScriptBase*)(&scriptDestination));
     }
 
@@ -478,6 +493,8 @@ public:
     {
         nVersion = CDynamicChainParams::CURRENT_VERSION;
         nValue = -1;
+        fFinalCoinsSupply = false;
+        strDescription = "";
         scriptDestination.clear();
     }
 
@@ -511,7 +528,6 @@ public:
     vector<uint32_t> vAdminIds;
 
     CCoinSupply coinSupply;
-    string strComment; // currently only used with coinSupply
 
     CChainDataMsg()
     {
@@ -534,10 +550,8 @@ public:
             READWRITE(vChainAdmins);
         if (HasChainParameters())
             READWRITE(dynamicChainParams);
-        if (HasCoinSupplyPayload()) {
+        if (HasCoinSupplyPayload())
             READWRITE(coinSupply);
-            READWRITE(strComment);
-        }
     }
 
     void SetNull()
@@ -551,7 +565,6 @@ public:
         vChainAdmins.clear();
         dynamicChainParams.SetNull();
         coinSupply.SetNull();
-        strComment.clear();
     }
 
     uint256 HashChainAdmins() const;

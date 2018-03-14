@@ -17,7 +17,7 @@
 #include <secp256k1.h>
 
 #define GENESIS_NODE_ID  0xc001d00d
-#define GENESIS_ADMIN_ID 0xad3aee01
+#define GENESIS_ADMIN_ID 0xad000001
 
 /** dynamic chain parameters range checks */
 #define MAX_BLOCK_SPACING 3600
@@ -37,6 +37,8 @@
 #define MIN_RETRY_NEW_SIG_SET_INTERVAL 2
 #define MAX_RETRY_NEW_SIG_SET_INTERVAL 600
 #define MIN_CHAIN_DATA_DESCRIPTION_LEN 20
+#define MAX_COINBASE_MATURITY 200
+#define MIN_COINBASE_MATURITY 10
 
 #define DEFAULT_NONCES_TO_KEEP 4
 #define DEFAULT_NONCE_POOL_SIZE 20
@@ -87,6 +89,8 @@ extern CvnInfoCacheType mapCVNInfoCache;
 
 extern uint32_t nCvnNodeId;
 extern uint32_t nChainAdminId;
+
+extern bool fCoinSupplyFinal;
 
 extern const char *pocStateNames[];
 
@@ -229,6 +233,7 @@ extern bool CvnVerifySignature(const uint256 &hash, const CSchnorrSig &sig, cons
 extern bool CvnVerifySignature(const uint256 &hash, const CSchnorrSig &sig, const uint32_t nCvnId);
 extern bool CvnVerifyAdminSignature(const vector<uint32_t> &nAdminIds, const uint256 &hashAdmin, const CSchnorrSig &sig);
 extern bool CheckForDuplicateCvns(const CBlock& block);
+extern bool CheckForSufficientNumberOfCvns(const CBlock& block, const Consensus::Params& params);
 extern bool CheckForDuplicateChainAdmins(const CBlock& block);
 extern bool CheckForDuplicateAdminSigs(const CBlock& block);
 extern bool CheckForDuplicateMissingChainSigs(const CBlock& block);
@@ -262,6 +267,7 @@ extern bool CheckProofOfCooperation(const CBlock& block, const Consensus::Params
 extern void UpdateCvnInfo(const CBlock* pblock, const uint32_t nHeight);
 extern void UpdateChainParameters(const CBlock* pblock);
 extern void UpdateChainAdmins(const CBlock* pblock);
+extern void SetCoinSupplyStatus(const CBlock* pblock);
 
 extern bool CheckDynamicChainParameters(const CDynamicChainParams& params);
 

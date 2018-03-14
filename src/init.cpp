@@ -202,7 +202,9 @@ void Shutdown()
     if (pwalletMain)
         pwalletMain->Flush(false);
 #endif
+#ifdef USE_CVN
     RunPOCThread(false, Params(), 0);
+#endif // USE_CVN
     StopNode();
     StopTorControl();
     UnregisterNodeSignals(GetNodeSignals());
@@ -1116,6 +1118,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
     std::ostringstream strErrors;
 
     if (mapArgs.count("-cvn")) {
+#ifdef USE_CVN
         if (GetArg("-cvn", "") == "fasito") {
 #ifdef USE_FASITO
             LogPrintf("Initializing fasito\n");
@@ -1123,7 +1126,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
             nCvnNodeId = InitCVNWithFasito(strFasitoPassword);
 #else
             LogPrintf("ERROR: invalid parameter -cvn=fasito. This wallet version was not compiled with fasito support\n");
-#endif
+#endif // USE_FASITO
         } else if (GetArg("-cvn", "") == "file") {
             nCvnNodeId = InitCVNWithCertificate(strFasitoPassword);
         } else
@@ -1134,6 +1137,9 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
 
         LogPrintf("Starting CVN node with ID 0x%08x\n", nCvnNodeId);
         uiInterface.InitMessage(_("Starting CVN node..."));
+#else
+        return InitError("This wallet was compiled without support for CVN functionality'\n");
+#endif // USE_CVN
     }
 
 #if 0
@@ -1186,7 +1192,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
 
     int64_t nStart;
 
-    // ********************************************************* Step 5: verify wallet database integrity and set up CVN
+    // ********************************************************* Step 5: verify wallet database integrity
 #ifdef ENABLE_WALLET
     if (!fDisableWallet) {
         LogPrintf("Using wallet %s\n", strWalletFile);
@@ -1213,14 +1219,6 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
     // sanitize comments per BIP-0014, format user agent and check total size
     std::vector<string> uacomments;
     std::string strClientName = CLIENT_NAME;
-#if 1
-    //TODO: remove this; for development only
-    if (nCvnNodeId) {
-        strClientName += strprintf("-0x%08x-%s", nCvnNodeId, GitCommit());
-    } else {
-        strClientName += strprintf("-%s", GitCommit());
-    }
-#endif
     BOOST_FOREACH(string cmt, mapMultiArgs["-uacomment"])
     {
         if (cmt != SanitizeString(cmt, SAFE_CHARS_UA_COMMENT))
@@ -1530,6 +1528,25 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
         pwalletMain = NULL;
         LogPrintf("Wallet disabled!\n");
     } else {
+        if (chainparams.NetworkIDString() == CBaseChainParams::MAIN) {
+            try {
+                boost::filesystem::path fairCoin1WalletFile = GetDefaultDataDirFC1() / "wallet.dat";
+                boost::filesystem::path fairCoin2WalletFile = GetDataDir(false) / strWalletFile;
+                if (GetBoolArg("-fc1walletupgrade", true) && !boost::filesystem::exists(fairCoin2WalletFile) && boost::filesystem::exists(fairCoin1WalletFile)) {
+                    LogPrintf("FairCoin1 wallet found here: %s\n", fairCoin1WalletFile.string());
+                    try {
+                        boost::filesystem::copy_file(fairCoin1WalletFile, GetDataDir(false) / strWalletFile, boost::filesystem::copy_option::fail_if_exists);
+                        LogPrintf("copied FairCoin1 wallet.dat to %s\n", fairCoin2WalletFile.string());
+
+                        SoftSetArg("-zapwallettxes", "2");
+                    } catch (const boost::filesystem::filesystem_error& e) {
+                        LogPrintf("error copying FairCoin1 wallet.dat to %s - %s, cannot perform wallet migration.\n", fairCoin2WalletFile.string(), e.what());
+                    }
+                }
+            } catch (const std::exception &e) {
+                LogPrintf("could not check for wallet migration: %s\n", e.what());
+            }
+        }
 
         // needed to restore wallet transaction meta data after -zapwallettxes
         std::vector<CWalletTx> vWtx;
@@ -1740,9 +1757,10 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler, const str
 
     StartNode(threadGroup, scheduler);
 
+#ifdef USE_CVN
     // Start up a CVN (generate blocks)
     RunPOCThread(GetBoolArg("-gen", DEFAULT_GENERATE), chainparams, nCvnNodeId);
-
+#endif // USE_CVN
     // ********************************************************* Step 12: finished
 
     SetRPCWarmupFinished();

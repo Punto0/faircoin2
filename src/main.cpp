@@ -1432,6 +1432,7 @@ bool IsInitialBlockDownload()
     if (chainActive.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge))
         return true;
 
+    LogPrintf("Initial blockchain download completed.\n");
     latchToFalse.store(true, std::memory_order_relaxed);
     return false;
 }
@@ -1669,7 +1670,7 @@ bool CheckTxInputs(const CTransaction& tx, CValidationState& state, const CCoins
 
             // If prev is coinbase, check that it's matured
             if (coins->IsCoinBase()) {
-                if (nSpendHeight - coins->nHeight < COINBASE_MATURITY)
+                if (nSpendHeight - coins->nHeight < (int)COINBASE_MATURITY)
                     return state.Invalid(false,
                         REJECT_INVALID, "bad-txns-premature-spend-of-coinbase",
                         strprintf("tried to spend coinbase at depth %d", nSpendHeight - coins->nHeight));
@@ -2078,38 +2079,46 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint("bench", "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs]\n", (unsigned)block.vtx.size(), 0.001 * (nTime3 - nTime2), 0.001 * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : 0.001 * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * 0.000001);
 
-    if (pindex->nHeight == 1 && hashPrevBlock == chainparams.GetConsensus().hashGenesisBlock) {
-        nFees += GetBoolArg("-testnet", false) ? 10000000 * COIN : MAX_MONEY;
-    }
-
-#ifdef ENABLE_COINSUPPLY
     if (block.HasCoinSupplyPayload()) {
         if (block.vtx[0].vout.size() != 2)
             return state.DoS(100, error("ConnectBlock(): invalid coinbase transaction for new supply. Not enough outputs"),
-                            REJECT_INVALID, "bad-cb-size");
+                            REJECT_INVALID, "bad-cs-size");
 
         if (block.vtx[0].vout[1].nValue != block.coinSupply.nValue)
             return state.DoS(100,
                     error("ConnectBlock(): invalid amount in coinbase transaction for new supply. (actual=%d vs expected=%d)",
                             block.vtx[0].vout[1].nValue, block.coinSupply.nValue),
-                            REJECT_INVALID, "bad-cb-amount");
+                            REJECT_INVALID, "bad-cs-amount");
 
         if (block.vtx[0].vout[1].scriptPubKey != block.coinSupply.scriptDestination)
             return state.DoS(100,
                     error("ConnectBlock(): invalid amount in coinbase script for new supply. (actual=%s vs expected=%s)",
                             ScriptToAsmStr(block.vtx[0].vout[1].scriptPubKey), ScriptToAsmStr(block.coinSupply.scriptDestination)),
-                            REJECT_INVALID, "bad-cb-script");
+                            REJECT_INVALID, "bad-cs-script");
+
+        if (block.vAdminIds.empty())
+            return state.DoS(100,
+                    error("ConnectBlock(): no admin signatures available"),
+                            REJECT_INVALID, "bad-cs-nosig");
+
+        if (block.vAdminIds.size() != mapChainAdmins.size())
+                    return state.DoS(100,
+                            error("ConnectBlock(): not all admins signed the coins supply message"),
+                                    REJECT_INVALID, "bad-cs-nosigall");
+
+        if (!MoneyRange(block.coinSupply.nValue)) {
+            return state.DoS(100,
+                    error("ConnectBlock(): amount of coin supply out of range:  %u",
+                            block.coinSupply.nValue),
+                            REJECT_INVALID, "bad-cs-amountoutofrange");
+        }
+
+        if (fCoinSupplyFinal)
+            return state.DoS(100, error("ConnectBlock(): coin supply is already final"),
+                            REJECT_INVALID, "coins-supply-final");
 
         nFees += block.coinSupply.nValue;
     }
-#else
-    if (block.HasCoinSupplyPayload()) {
-        if (block.vtx[0].vout[1].scriptPubKey != block.coinSupply.scriptDestination)
-            return state.DoS(100,
-                    error("ConnectBlock(): received coin supply payload but this wallet is not compiled with coin supply enabled"),
-                            REJECT_INVALID, "bad-cb-supply");
-    }
-#endif
 
     if (block.HasTx() && block.vtx[0].GetValueOut() > nFees)
         return state.DoS(100,
@@ -2456,6 +2465,10 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
 
     if (pblock->HasChainAdmins())
         UpdateChainAdmins(pblock);
+
+    if (pblock->HasCoinSupplyPayload()) {
+        SetCoinSupplyStatus(pblock);
+    }
 
     if (!IsInitialBlockDownload()) {
         const uint32_t nNextCreator = CheckNextBlockCreator(pindexNew, block.nTime + 1);
@@ -3028,6 +3041,10 @@ bool CheckBlock(const CBlock& block, CValidationState& state, bool fCheckPOC, bo
         if (!CheckForDuplicateCvns(block))
             return state.DoS(100, error("CheckBlock(): duplicate entries in CVN payload"),
                          REJECT_INVALID, "bad-dupl-cvn");
+
+        if (!CheckForSufficientNumberOfCvns(block, Params().GetConsensus()))
+            return state.DoS(20, error("CheckBlock(): insufficient number of CVN entries in payload"),
+                         REJECT_INVALID, "too-few-cvns");
     }
 
     if (block.HasChainAdmins()) {
@@ -3570,7 +3587,7 @@ bool static LoadBlockIndexDB()
     {
         CBlockIndex* pindex = item.second;
 
-        if (pindex->nVersion & CBlock::CVN_PAYLOAD) {
+        if ((pindex->nVersion & CBlock::CVN_PAYLOAD) && pindex->IsValid(BLOCK_VALID_TRANSACTIONS)) {
             CachedCvnType::iterator it = mapChachedCVNInfoBlocks.find(pindex->GetBlockHash());
 
             if (it == mapChachedCVNInfoBlocks.end()) {
@@ -3695,8 +3712,7 @@ bool CVerifyDB::SetMostRecentCVNData(const CChainParams& chainparams, CBlockInde
 {
     bool fFoundCvnInfoPayload = false, fFoundDynamicChainParamsPayload = false, fFoundChainAdminsPayload = false;
 
-    for (CBlockIndex* pindex = pindexStart; pindex; pindex = pindex->pprev)
-    {
+    for (CBlockIndex* pindex = pindexStart; pindex; pindex = pindex->pprev) {
         if (pindex->nVersion & (CBlock::CVN_PAYLOAD | CBlock::CHAIN_PARAMETERS_PAYLOAD | CBlock::CHAIN_ADMINS_PAYLOAD)) {
             CBlock block;
             if (!ReadBlockFromDisk(block, pindex, chainparams.GetConsensus()))
@@ -3719,7 +3735,7 @@ bool CVerifyDB::SetMostRecentCVNData(const CChainParams& chainparams, CBlockInde
         }
 
         if (fFoundCvnInfoPayload && fFoundDynamicChainParamsPayload && fFoundChainAdminsPayload)
-            return true;
+            break;
     }
 
     if (!fFoundCvnInfoPayload)
@@ -3731,7 +3747,17 @@ bool CVerifyDB::SetMostRecentCVNData(const CChainParams& chainparams, CBlockInde
     if (!fFoundChainAdminsPayload)
         LogPrintf("SetMostRecentCVNData(): *** could not find a block with chain admins payload. Can not continue.\n");
 
-    return false;
+    for (CBlockIndex* pindex = pindexStart; pindex; pindex = pindex->pprev) {
+        if (pindex->nVersion & CBlock::COIN_SUPPLY_PAYLOAD) {
+            CBlock block;
+            if (!ReadBlockFromDisk(block, pindex, chainparams.GetConsensus()))
+                return error("SetMostrecentCVNData(): *** ReadBlockFromDisk failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
+
+            SetCoinSupplyStatus(&block);
+        }
+    }
+
+    return (fFoundCvnInfoPayload && fFoundDynamicChainParamsPayload && fFoundChainAdminsPayload);
 }
 
 bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview, int nCheckLevel, int nCheckDepth)
@@ -3766,10 +3792,16 @@ bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview,
         // check level 0: read from disk
         if (!ReadBlockFromDisk(block, pindex, chainparams.GetConsensus()))
             return error("VerifyDB(): *** ReadBlockFromDisk failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
-        // find the most recent CVN and ChainParams block
-        if (pindex->pprev && block.HasAdminPayload() && !block.HasCoinSupplyPayload())
-            if (!SetMostRecentCVNData(chainparams, pindex->pprev))
-                return error("VerifyDB(): *** SetMostRecentCVNData failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
+        // find the most recent CVN, chain admins, and ChainParams block
+        if (pindex->pprev && block.HasAdminPayload()) {
+            if (block.HasCoinSupplyPayload()) {
+                if (block.coinSupply.fFinalCoinsSupply)
+                    fCoinSupplyFinal = false;
+            } else {
+                if (!SetMostRecentCVNData(chainparams, pindex->pprev))
+                    return error("VerifyDB(): *** SetMostRecentCVNData failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
+            }
+        }
         // check level 1: verify block validity
         if (nCheckLevel >= 1 && !CheckBlock(block, state))
             return error("VerifyDB(): *** found bad block at %d, hash=%s\n", pindex->nHeight, pindex->GetBlockHash().ToString());
@@ -3825,6 +3857,9 @@ bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview,
 
             if (block.HasChainAdmins())
                 UpdateChainAdmins(&block);
+
+            if (block.HasCoinSupplyPayload())
+                SetCoinSupplyStatus(&block);
         }
     }
 
@@ -5038,6 +5073,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                 RelayChainData(msg);
             } else {
                 LogPrintf("received invalid chain data %s\n", msg.ToString());
+                Misbehaving(pfrom->GetId(), 50);
             }
         } else {
             LogPrint("net", "AlreadyHave chain data %s\n", hashData.ToString());

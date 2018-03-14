@@ -193,7 +193,7 @@ string CFasitoKey::ToString() const
     return s.str();
 }
 
-bool CFasito::login(const string& strPassword)
+bool CFasito::login(const string& strPassword, string &strError)
 {
     if (!fInitialized)
         return false;
@@ -205,11 +205,11 @@ bool CFasito::login(const string& strPassword)
     vector<string> res;
     try {
         if (!fasito.sendAndReceive("LOGIN " + strPassword, res)) {
-            LogPrintf("CreateNonceWithFasito : could not login: %s\n", (!res.empty() ? res[0] : "error not available"));
+            strError = !res.empty() ? res[0] : "error not available";
             return false;
         }
     } catch(const std::exception &e) {
-        LogPrintf("failed to send login command: %s\n", e.what());
+        strprintf(strError, "failed to send login command: %s", e.what());
         return false;
     }
 
@@ -240,6 +240,20 @@ bool CFasito::logout()
     return false;
 }
 
+void CFasito::emtpyInputBuffer()
+{
+    setTimeout(boost::posix_time::millisec(200));
+    writeString("\r");
+
+    try {
+        while (true) {
+            readStringUntil("\r\n");
+        }
+    } catch(const std::exception &e) {
+
+    }
+}
+
 /*
 Serial number     : 012345678999
 Token status      : CONFIGURED
@@ -263,7 +277,10 @@ Key #7            : 0x00000000 (CONFIGURED, protected)
 
 void CFasito::open(const string &devname)
 {
+    LOCK(cs_connection);
     SerialConnection::open(devname, 230400);
+
+    emtpyInputBuffer();
 
     int i = 0;
     vector<string> res;
@@ -319,6 +336,8 @@ void CFasito::open(const string &devname)
 
 void CFasito::close()
 {
+    LOCK(cs_connection);
+
     if (fLoggedIn)
         logout();
 
@@ -354,7 +373,7 @@ static void RetrievePubKeys()
     }
 }
 
-static bool InitFasito(const string& strPassword)
+bool InitFasito(const string& strPassword, string& strError)
 {
     const string strDevice = GetArg("-fasitodevice", "/dev/ttyACM0");
 
@@ -366,30 +385,35 @@ static bool InitFasito(const string& strPassword)
                 fasito.strFasitoVersion, fasito.strSerialNumber, fasito.strPinStatus, fasito.strProtectionStatus);
 
         if (fasito.strTokenStatus != "CONFIGURED") {
-            LogPrintf("ERROR: Fasito not configured\n");
+            strError = "Fasito not configured";
+            return false;
+        }
+
+        if (boost::algorithm::starts_with(fasito.strPinStatus, "LOCKED")) {
+            strError = "Fasito is locked";
             return false;
         }
 
         size_t nPassLen = strPassword.length();
         if (strPassword.empty()) {
-            LogPrintf("ERROR: no Fasito PIN supplied\n");
+            strError = "no PIN supplied";
             return false;
         }
 
         if (nPassLen != 6) {
-            LogPrintf("ERROR: invalid Fasito PIN\n");
+            strError = "invalid PIN length";
             return false;
         }
 
-        if (!fasito.login(strPassword)) {
-            LogPrintf("ERROR: wrong Fasito PIN\n");
+        if (!fasito.login(strPassword, strError)) {
             return false;
         }
 
         /* Retrieve the public keys */
         RetrievePubKeys();
     } catch (const std::exception& e) {
-        LogPrintf("ERROR: could not open device: %s\n", strDevice);
+        strError = "could not open device: " + strDevice;
+
         if (fasito.fInitialized)
             fasito.close();
         return false;
@@ -400,8 +424,11 @@ static bool InitFasito(const string& strPassword)
 
 uint32_t InitCVNWithFasito(const string &strFasitoPassword)
 {
-    if (!InitFasito(strFasitoPassword))
-          return false;
+    string strError;
+    if (!InitFasito(strFasitoPassword, strError)) {
+        LogPrintf("%s: %s\n", __func__, strError);
+        return 0;
+    }
 
     uint32_t nKeyIndex = GetArg("-fasitocvnkeyindex", 0);
     if (nKeyIndex > 6) {
@@ -432,25 +459,30 @@ uint32_t InitCVNWithFasito(const string &strFasitoPassword)
     return fKey.nCvnId;
 }
 
-uint32_t InitChainAdminWithFasito(const string& strPassword, const uint32_t nKeyIndex)
+uint32_t InitChainAdminWithFasito(const string& strPassword, const uint32_t nKeyIndex, string &strError)
 {
     bool fWasInitialised = true;
     if (!fasito.fInitialized) {
-        if (!InitFasito(strPassword))
-             return false;
+        if (!InitFasito(strPassword, strError)) {
+            LogPrintf("%s\n", strError);
+            fasito.close();
+            return 0;
+        }
 
         fWasInitialised = false;
     }
 
     if (nKeyIndex > 6) {
-        LogPrintf("invalid value for adminkeyindex: %d\n", nKeyIndex);
+        strprintf(strError, "invalid value for adminkeyindex: %d", nKeyIndex);
+        LogPrintf("%s\n", strError);
         if (!fWasInitialised)
             fasito.close();
         return 0;
     }
 
     if (!fasito.mapKeys.count(nKeyIndex)) {
-        LogPrintf("key #%d not found on Fasito\n", nKeyIndex);
+        strprintf(strError, "key #%d not found on Fasito", nKeyIndex);
+        LogPrintf("%s\n", strError);
         if (!fWasInitialised)
             fasito.close();
         return 0;
@@ -458,7 +490,8 @@ uint32_t InitChainAdminWithFasito(const string& strPassword, const uint32_t nKey
 
     CFasitoKey &fasitoKeys = fasito.mapKeys[nKeyIndex];
     if (fasitoKeys.status != CONFIGURED) {
-        LogPrintf("key #%d not configured on Fasito\n", nKeyIndex);
+        strprintf(strError, "key #%d not configured on Fasito", nKeyIndex);
+        LogPrintf("%s\n", strError);
         if (!fWasInitialised)
             fasito.close();
         return 0;
@@ -472,4 +505,18 @@ uint32_t InitChainAdminWithFasito(const string& strPassword, const uint32_t nKey
 
     LogPrintf("Using Fasito for ADMIN ID 0x%08x with public key %s\n", fKey.nCvnId, HexStr(vPubKey));
     return fKey.nCvnId;
+}
+
+bool FasitoInitPrivKey(const CKey& privKey, const uint32_t nKeyIndex, const uint32_t nId)
+{
+    std::stringstream strInitKeyCmd;
+    strInitKeyCmd << strprintf("INITKEY %d 0x%08x %s", nKeyIndex, nId, bin2hex(&privKey.begin()[0], 32));
+
+    vector<string> res;
+    if (!fasito.sendAndReceive(strInitKeyCmd.str(), res)) {
+        LogPrintf("FasitoInitPrivKey : could not initialise private key: %s\n", (!res.empty() ? res[0] : "error not available"));
+        return false;
+    }
+
+    return true;
 }

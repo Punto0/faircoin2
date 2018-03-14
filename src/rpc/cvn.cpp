@@ -20,13 +20,212 @@
 #include <univalue.h>
 #include "server.h"
 
+extern void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fIncludeHex);
+
 using namespace std;
 
 static string strMethod;
-static uint8_t nAdminNonceHandle = 0;
 static CSchnorrPrivNonce adminPrivNonce;
 static CSchnorrNonce adminPublicNonce;
 
+#ifdef USE_CVN
+static uint8_t nAdminNonceHandle = 0;
+#endif // USE_CVN
+
+UniValue getactivecvns(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() > 1)
+        throw runtime_error(
+            "getactivecvns\n"
+            "\nDisplay a list of all currently active CVN\n"
+            "\nArguments: none\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"count\" : \"n\",                (numeric) The number currently activated CNVs\n"
+            "  \"currentHeight\" : \"n\",        (numberc) The current block height the result relates to\n"
+            "  \"cvns\" : [                    (array of json objects)\n"
+            "     {\n"
+            "       \"nodeId\": \"id\",          (string) The transaction id\n"
+            "       \"pubKey\": \"public key\",  (string) The public key of the CVN\n"
+            "       \"heightAdded\": n,        (numeric) The height when the CVN was added to the network\n"
+            "       \"predictedNextBlock\": n, (numeric) The height of the next block this CVNs most probably will create\n"
+            "       \"lastBlocksSigned\": n    (numeric) The number of blocks signed within the last " + strprintf("%d", (int)dynParams.nMinSuccessiveSignatures) + " blocks\n"
+            "     }\n"
+            "     ,...\n"
+            "  ],\n"
+            "}\n"
+            "\nExamples:\n"
+            "\nDisplay CVN list\n"
+            + HelpExampleCli("getactivecvns","")
+        );
+
+    LOCK(cs_mapCVNs);
+
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("count", (int)mapCVNs.size()));
+    result.push_back(Pair("currentHeight", chainActive.Tip()->nHeight));
+    UniValue cvns(UniValue::VARR);
+
+    BOOST_FOREACH(const CvnMapType::value_type& cvn, mapCVNs)
+    {
+        const CCvnInfo& c = cvn.second;
+
+        UniValue entry(UniValue::VOBJ);
+        entry.push_back(Pair("nodeId", strprintf("0x%08x", c.nNodeId)));
+        entry.push_back(Pair("pubKey", c.pubKey.ToString()));
+        entry.push_back(Pair("heightAdded", (int)c.nHeightAdded));
+
+        CCvnStatus status(c.nNodeId);
+        CheckNextBlockCreator(chainActive.Tip(), GetAdjustedTime(), &status);
+        entry.push_back(Pair("predictedNextBlock", (int)status.nPredictedNextBlock));
+        entry.push_back(Pair("lastBlocksSigned", (int)status.nBlockSigned));
+
+        cvns.push_back(entry);
+    }
+
+    result.push_back(Pair("cvns", cvns));
+
+    return result;
+}
+
+UniValue getactiveadmins(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() > 1)
+        throw runtime_error(
+            "getactiveadmins\n"
+            "\nDisplay a list of all currently active chain administrators\n"
+            "\nArguments: none\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"count\" : \"n\",               (numeric) The number currently activated CNVs\n"
+            "  \"currentHeight\" : \"n\",       (numberc) The current block height the result relates to\n"
+            "  \"admins\" : [                 (array of json objects)\n"
+            "     {\n"
+            "       \"adminId\": \"id\",        (string) The transaction id\n"
+            "       \"pubKey\": \"public key\", (string) The public key of the CVN\n"
+            "       \"heightAdded\": n        (numeric) The height when the CVN was added to the network\n"
+            "     }\n"
+            "     ,...\n"
+            "  ],\n"
+            "}\n"
+            "\nExamples:\n"
+            "\nDisplay Chain Admins list\n"
+            + HelpExampleCli("getactiveadmins","")
+        );
+
+    LOCK(cs_mapChainAdmins);
+
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("count", (int)mapChainAdmins.size()));
+    result.push_back(Pair("currentHeight", chainActive.Tip()->nHeight));
+    UniValue admins(UniValue::VARR);
+
+    BOOST_FOREACH(const ChainAdminMapType::value_type& admin, mapChainAdmins)
+    {
+        const CChainAdmin& a = admin.second;
+
+        UniValue entry(UniValue::VOBJ);
+        entry.push_back(Pair("adminId", strprintf("0x%08x", a.nAdminId)));
+        entry.push_back(Pair("pubKey", a.pubKey.ToString()));
+        entry.push_back(Pair("heightAdded", (int)a.nHeightAdded));
+
+        string strCurrentNonce = "";
+        if (mapAdminNonces.count(a.nAdminId)) {
+            strCurrentNonce = mapAdminNonces[a.nAdminId].ToString();
+        }
+
+        entry.push_back(Pair("currentNonce", strCurrentNonce));
+
+        string strCurrentPartialSig = "";
+        if (mapAdminSigs.count(a.nAdminId)) {
+            strCurrentPartialSig = mapAdminSigs[a.nAdminId].signature.ToString();
+        }
+
+        entry.push_back(Pair("currentPartialSig", strCurrentPartialSig));
+
+        admins.push_back(entry);
+    }
+
+    result.push_back(Pair("admins", admins));
+
+    return result;
+}
+
+void DynamicChainparametersToJSON(const CDynamicChainParams& cp, UniValue& result)
+{
+    result.push_back(Pair("version", (int)cp.nVersion));
+    result.push_back(Pair("minAdminSigs", (int)cp.nMinAdminSigs));
+    result.push_back(Pair("maxAdminSigs", (int)cp.nMaxAdminSigs));
+    result.push_back(Pair("blockSpacing", (int)cp.nBlockSpacing));
+    result.push_back(Pair("blockSpacingGracePeriod", (int)cp.nBlockSpacingGracePeriod));
+    result.push_back(Pair("transactionFee", ValueFromAmount(cp.nTransactionFee)));
+    result.push_back(Pair("dustThreshold", ValueFromAmount(cp.nDustThreshold)));
+    result.push_back(Pair("minSuccessiveSignatures", (int)cp.nMinSuccessiveSignatures));
+    result.push_back(Pair("blocksToConsiderForSigCheck", (int)cp.nBlocksToConsiderForSigCheck));
+    result.push_back(Pair("percentageOfSignaturesMean", (int)cp.nPercentageOfSignaturesMean));
+    result.push_back(Pair("maxBlockSize", (int)cp.nMaxBlockSize));
+    result.push_back(Pair("blockPropagationWaitTime", (int)cp.nBlockPropagationWaitTime));
+    result.push_back(Pair("retryNewSigSetInterval", (int)cp.nRetryNewSigSetInterval));
+    result.push_back(Pair("coinbaseMaturity", (int)cp.nCoinbaseMaturity));
+    result.push_back(Pair("description", cp.strDescription));
+}
+
+void CoinSupplyToJSON(const CCoinSupply& cs, UniValue& result)
+{
+    result.push_back(Pair("version", (int)cs.nVersion));
+    result.push_back(Pair("value", ValueFromAmount(cs.nValue)));
+    result.push_back(Pair("isFinal", cs.fFinalCoinsSupply));
+    result.push_back(Pair("description", cs.strDescription));
+
+    UniValue o(UniValue::VOBJ);
+    ScriptPubKeyToJSON(cs.scriptDestination, o, true);
+
+    result.push_back(Pair("destination", o));
+}
+
+UniValue getchainparameters(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getchainparameters\n"
+            "\nDisplay the current values of the dynamic chain parameters\n"
+            "\nArguments:\n"
+            "none\n"
+            "\nResult:\n"
+            "{\n"
+                "  \"nextBlockToCreate\":height     ,           (int) The estimated next block to create\n"
+                "  \"reserved\":\"reserved\",                   (string) reserved\n"
+             "}\n"
+            "\nExamples:\n"
+            "\nDisplay dynamic chain parameters\n"
+            + HelpExampleCli("getchainparameters","")
+        );
+
+    UniValue result(UniValue::VOBJ);
+    DynamicChainparametersToJSON(dynParams, result);
+
+    return result;
+}
+
+UniValue estimatefee(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw std::runtime_error(
+            "estimatefee nblocks\n"
+            "\nReturns the current mandatory fee per kilobyte needed for a transaction to be accepted.\n"
+            "\nArguments:\n"
+            "1. nblocks     (numeric, required) - dummy value for API compatibility\n"
+            "\nResult:\n"
+            "n              (numeric) mandatory fee-per-kilobyte\n"
+            "\n"
+            "\nExample:\n"
+            + HelpExampleCli("estimatefee", "123")
+            );
+
+    return ValueFromAmount(dynParams.nTransactionFee);
+}
+
+#ifdef USE_CVN
 static bool AddAdminSignatures(CChainDataMsg &msg)
 {
     if (mapAdminSigs.empty()) {
@@ -45,16 +244,16 @@ static bool AddAdminSignatures(CChainDataMsg &msg)
         throw runtime_error(
             strprintf("not enough signatures supplied "
                       "(got %u signatures, but need at least %u to sign)", nSigs, dynParams.nMinAdminSigs));
-    if (nSigs > dynParams.nMaxAdminSigs || nSigs > MAX_NUMBER_OF_CHAIN_ADMINS)
+    if (nSigs > dynParams.nMaxAdminSigs || nSigs > MAX_NUMBER_OF_CHAIN_ADMINS || nSigs > mapChainAdmins.size())
         throw runtime_error(
-            strprintf("too many signatures supplied %u (%u max)\nReduce the number", nSigs, dynParams.nMaxAdminSigs));
+            strprintf("too many signatures supplied %u (%u/%u max)\nReduce the number", nSigs, mapChainAdmins.size(), dynParams.nMaxAdminSigs));
 
-    if (msg.HasCoinSupplyPayload() && nSigs < dynParams.nMaxAdminSigs)
+    if (msg.HasCoinSupplyPayload() && nSigs != mapChainAdmins.size())
         throw runtime_error(
                 strprintf("not enough signatures supplied "
-                       "(got %u signatures, but need at least %u to sign for coin supply)", nSigs, dynParams.nMaxAdminSigs));
+                       "(got %u signatures, but need at least %u to sign for coin supply)", nSigs, mapChainAdmins.size()));
 
-    if (mapChainAdmins.size() == 1 || (dynParams.nMinAdminSigs && mapAdminNonces.size() == 1)) {
+    if (mapChainAdmins.size() == 1 || (dynParams.nMinAdminSigs == 1 && mapAdminNonces.size() == 1)) {
         msg.vAdminIds     = sigFirst.vSignerIds;
         msg.adminMultiSig = sigFirst.signature;
         return CheckAdminSignature(msg.vAdminIds, msg.GetHash(), msg.adminMultiSig, msg.HasCoinSupplyPayload());
@@ -185,6 +384,7 @@ static bool AddDynParamsToMsg(CChainDataMsg& msg, UniValue jsonParams)
     params.nPercentageOfSignaturesMean  = dynParams.nPercentageOfSignaturesMean;
     params.nMaxBlockSize                = dynParams.nMaxBlockSize;
     params.nBlockPropagationWaitTime    = dynParams.nBlockPropagationWaitTime;
+    params.nCoinbaseMaturity            = dynParams.nCoinbaseMaturity;
     params.nRetryNewSigSetInterval      = dynParams.nRetryNewSigSetInterval;
 
     bool fAllGood = true;
@@ -215,6 +415,8 @@ static bool AddDynParamsToMsg(CChainDataMsg& msg, UniValue jsonParams)
             params.nBlockPropagationWaitTime = jsonParams[key].get_int();
         } else if (key == "retryNewSigSetInterval") {
             params.nRetryNewSigSetInterval = jsonParams[key].get_int();
+        } else if (key == "coinbaseMaturity") {
+            params.nCoinbaseMaturity = jsonParams[key].get_int();
         } else if (key == "description") {
             params.strDescription = jsonParams[key].get_str();
         } else {
@@ -284,11 +486,11 @@ UniValue setgenerate(const UniValue& params, bool fHelp)
     return NullUniValue;
 }
 
-UniValue chainadminlogin(const UniValue& params, bool fHelp)
+UniValue fasitologin(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size() < 2 || params.size() > 3)
         throw runtime_error(
-            "chainadminlogin type PIN\n"
+            "fasitologin type PIN\n"
             "\nLogin to Fasito or read the admin certificate file.\n"
             "\nArguments:\n"
             "1. method      (string, required) Signing method: 'fasito' or 'file'.\n"
@@ -296,8 +498,8 @@ UniValue chainadminlogin(const UniValue& params, bool fHelp)
             "3. key index   (numeric, optinal) The index of the key on Fasito. (default is 0)\n"
             "\nExamples:\n"
             "\nLogin to Fasito\n"
-            + HelpExampleCli("chainadminlogin", "fasito 123456 0")
-            + HelpExampleCli("chainadminlogin", "file mySecretPassword")
+            + HelpExampleCli("fasitologin", "fasito 123456 0")
+            + HelpExampleCli("fasitologin", "file mySecretPassword")
         );
 
     LOCK(cs_main);
@@ -310,6 +512,7 @@ UniValue chainadminlogin(const UniValue& params, bool fHelp)
     string method = params[0].get_str();
     const string strPassword = params[1].get_str();
 
+    string strErrorMsg;
     if (method == "fasito") {
         if (params.size() < 2) {
             throw JSONRPCError(RPC_INVALID_PARAMS, "Fasito PIN not supplied\n");
@@ -317,18 +520,35 @@ UniValue chainadminlogin(const UniValue& params, bool fHelp)
 #ifdef USE_FASITO
         LogPrintf("Initializing fasito for chain adminstration\n");
         const uint32_t nKeyIndex = params.size() == 3 ? params[2].get_int() : 0;
-        nChainAdminId = InitChainAdminWithFasito(strPassword, nKeyIndex);
+        nChainAdminId = InitChainAdminWithFasito(strPassword, nKeyIndex, strErrorMsg);
 #else
         return "ERROR: This wallet version was not compiled with fasito support\n";
 #endif
     } else if (method == "file") {
-        nChainAdminId = InitChainAdminWithCertificate(strPassword);
+        string strOldAdminKeyFile;
+        string strOldAdminCertFile;
+        if (params.size() == 3) {
+            strOldAdminKeyFile = GetArg("-adminkeyfile", "admin.pem");
+            strOldAdminCertFile = GetArg("-admincertfile", "admin.pem");
+            mapArgs["-adminkeyfile"] = mapArgs["-admincertfile"] = params[2].get_str();
+            LogPrintf("using key file: %s\n", mapArgs["-adminkeyfile"]);
+        }
+
+        nChainAdminId = InitChainAdminWithCertificate(strPassword, strErrorMsg);
+
+        if (params.size() == 3) {
+            mapArgs["-adminkeyfile"] = strOldAdminKeyFile;
+            mapArgs["-admincertfile"] = strOldAdminCertFile;
+        }
     } else {
         throw JSONRPCError(RPC_INVALID_PARAMS, "invalid signing method. Must be one of 'fasito' or 'file'\n");
     }
 
     if (!nChainAdminId) {
-        throw JSONRPCError(RPC_INTERNAL_ERROR, "could not find a vaild chain admin ID\n");
+        if (strErrorMsg.size())
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Fasito login error: " + strErrorMsg + "\n");
+        else
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "could not find a vaild chain admin ID\n");
     }
 
     LogPrintf("Configuring node with chain admin ID 0x%08x\n", nChainAdminId);
@@ -338,17 +558,17 @@ UniValue chainadminlogin(const UniValue& params, bool fHelp)
     return "OK";
 }
 
-UniValue chainadminlogout(const UniValue& params, bool fHelp)
+UniValue fasitologout(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size())
         throw runtime_error(
-            "chainadminlogout\n"
+            "fasitologout\n"
             "\nLogout from Fasito.\n"
             "\nArguments:\n"
             "none\n"
             "\nExample:\n"
             "\nLogout from Fasito\n"
-            "chainadminlogout"
+            "fasitologout"
         );
 
     LOCK(cs_main);
@@ -375,17 +595,96 @@ UniValue chainadminlogout(const UniValue& params, bool fHelp)
     return "OK";
 }
 
-UniValue chainadminnonce(const UniValue& params, bool fHelp)
+UniValue fasitoinitkey(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 3)
+        throw runtime_error(
+            "fasitoinitkey PIN slot\n"
+            "\nInitialise a private key slot on Fasito.\n"
+            "\nArguments:\n"
+            "1. PIN            (string, required) The PIN to log on to the Fasito\n"
+            "2. slot number    (numberic, required) The number of the key slot to initialise (0-6)\n"
+            "3. CVN/Admin ID   (string, required) The CVN or Admin ID in hex notation. E.g. 0x12345678\n"
+            "\nExample:\n"
+            "\nInit key slot 0\n"
+            "fasitoinitkey 123456 0 0x12345678"
+        );
+
+    const string strPIN = params[0].get_str();
+    const int nSlotNumber = params[1].get_int();
+
+    CKey secret;
+
+    if (strPIN.empty())
+        return error("please provide a vaild PIN");
+
+    if (nSlotNumber < 0 || nSlotNumber > 6)
+        return error("please provide a vaild slot number. (0-6)");
+
+    uint32_t nId;
+    stringstream ss;
+    ss << hex << params[2].get_str();
+    ss >> nId;
+
+#ifndef USE_FASITO
+    return error("This wallet version was not compiled with Fasito support\n");
+#else
+
+    bool fWasInitialised = true;
+    string strErrorMsg;
+    if (!fasito.fInitialized) {
+        if (!InitFasito(strPIN, strErrorMsg)) {
+            fasito.close();
+            return error("could not init Fasito: %s", strErrorMsg);
+        }
+
+        fWasInitialised = false;
+    } else
+        LogPrintf("Fasito was already initialised\n");
+
+    if (fasito.mapKeys[nSlotNumber].status == CONFIGURED) {
+        if (!fWasInitialised)
+            fasito.close();
+        return error("slot #%u already configured", nSlotNumber);
+    }
+
+    if (fasito.mapKeys[nSlotNumber].status != SEEDED) {
+        if (!fWasInitialised)
+            fasito.close();
+        return error("slot #%u not seeded", nSlotNumber);
+    }
+
+    secret.MakeNewKey(false);
+
+    if (!FasitoInitPrivKey(secret, nSlotNumber, nId)) {
+        if (!fWasInitialised)
+            fasito.close();
+        return error("could not initialise private key #%u", nSlotNumber);
+    }
+
+    if (!fWasInitialised)
+        fasito.close();
+
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("slot", nSlotNumber));
+    result.push_back(Pair("id", strprintf("0x%08x", nId)));
+    result.push_back(Pair("recoveryHash", HexStr(secret.begin(), secret.end())));
+
+    return result;
+#endif // USE_FASITO
+}
+
+UniValue fasitononce(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size())
         throw runtime_error(
-            "chainadminnonce\n"
+            "fasitononce\n"
             "\nCreates a nonce pair and publishes the public part on the network.\n"
             "\nArguments:\n"
             "none\n"
             "\nExample:\n"
             "\nCreate a nonce pair\n"
-            "chainadminlogin"
+            "fasitononce"
         );
 
     bool fFasito = strMethod == "fasito";
@@ -430,31 +729,34 @@ UniValue chainadminnonce(const UniValue& params, bool fHelp)
     if (AddNonceAdmin(msg)) {
         RelayNonceAdmin(msg);
     } else {
-        return "ERROR: could not create nonce pair";
+        return error("could not create nonce pair");
     }
 
     return msg.ToString();
 }
 
-UniValue chainadminsign(const UniValue& params, bool fHelp)
+UniValue fasitosign(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
         throw runtime_error(
-            "chainadminsign\n"
+            "fasitosign\n"
             "\nCreate a partial signature using the received nonces.\n"
             "\nArguments:\n"
             "1. chain data hash      (string, required) The hash of the chain data to be signed\n"
             "\nExample:\n"
             "\nCreate a partial signature for the hash\n"
-            + HelpExampleCli("chainadminlogin", "9afdc03617091ac720958a47dee67fea38c40396594996531564c445f2c7603a")
+            + HelpExampleCli("fasitosign", "9afdc03617091ac720958a47dee67fea38c40396594996531564c445f2c7603a")
         );
+
+    bool fFasito = strMethod == "fasito";
+
+    if (!nChainAdminId || (!fFasito && !adminPrivKey.IsValid()))
+        return error("wallet not configured for chain administration");
 
     LOCK(cs_main);
     UniValue result(UniValue::VOBJ);
 
-    uint256 hashToSign = ParseHashV(params[0], "parameter 1");
-
-    bool fFasito = strMethod == "fasito";
+    uint256 hashToSign = ParseHashV(params[0], "chain data hash");
 
     CAdminPartialSignatureUnsinged signature;
     if (!AdminSignPartial(hashToSign, signature, nChainAdminId, fFasito ? NULL : &adminPrivNonce, nAdminNonceHandle)) {
@@ -547,7 +849,7 @@ UniValue addcvn(const UniValue& params, bool fHelp)
     }
 
     if (!AddAdminIds(msg)) {
-        return "could not add admin ids";
+        return error("could not add admin ids");
     }
 
     // if no or not all signatures are available we print out the CChainDataMsg's hash to sign
@@ -561,7 +863,7 @@ UniValue addcvn(const UniValue& params, bool fHelp)
     }
 
     if (!AddAdminSignatures(msg))
-        return "error in signatures";
+        return error("invalid signatures");
 
     result.push_back(Pair("nodeId", strprintf("0x%08x", nNodeId)));
 
@@ -581,7 +883,7 @@ UniValue addcvn(const UniValue& params, bool fHelp)
     }
 
     if (IsInitialBlockDownload())
-        return "wait for block chain download to finish";
+        return error("wait for block chain download to finish");
 
     if (AddChainData(msg)) {
         RelayChainData(msg);
@@ -686,18 +988,17 @@ UniValue removecvn(const UniValue& params, bool fHelp)
     return result;
 }
 
-UniValue signchaindata(const UniValue& params, bool fHelp)
+UniValue fasitoschnorr(const UniValue& params, bool fHelp)
 {
-    if (fHelp || params.size() < 1 || params.size() > 2)
+    if (fHelp || params.size() != 1)
         throw runtime_error(
-            "signchaindata \"signchaindata\"\n"
-            "\nCreates a signature of chain data\n"
+            "fasitoschnorr \"dataHash\"\n"
+            "\nCreates an EC Schnorr signature of the given hash\n"
             "\nArguments:\n"
-            "1. \"hashChainData\"   (string, required) The hash of the chain data.\n"
-            "2. \"PIN\"             (string, optional) The PIN for the fasito private admin key\n"
+            "1. \"data hash\"   (string, required) The hash of the data to sign.\n"
             "\nExamples:\n"
             "\nCreate a signature\n"
-            + HelpExampleCli("signchaindata", "a1b5..9093 123456")
+            + HelpExampleCli("fasitoschnorr", "a1b5..9093")
         );
 
     LOCK(cs_main);
@@ -705,27 +1006,136 @@ UniValue signchaindata(const UniValue& params, bool fHelp)
     if (!nChainAdminId || !adminPrivKey.IsValid())
         return "ERROR: wallet not configured for chain administration";
 
-    uint256 hashChainData = uint256S(params[0].get_str());
+    vector<uint8_t> strDataHash = ParseHex(params[0].get_str());
+
+    if (strDataHash.size() != 32)
+        return "ERROR: invalid data hash";
+
+    uint256 dataHash = uint256(strDataHash);
 
     CSchnorrSig signature;
-
-    if (params.size() == 2)  {
-        // TODO: do fasito stuff
-    } else {
-        if (!adminPrivKey.SchnorrSign(hashChainData, signature))
-            return "error, could not create signature";
-    }
-
-    uint32_t dummy[1] = {0};
+    if (!adminPrivKey.SchnorrSign(dataHash, signature))
+        return "error, could not create signature";
 
     UniValue result(UniValue::VOBJ);
-    UniValue adminSigners(UniValue::VARR);
-    BOOST_FOREACH(const uint32_t& signerId, dummy)
-    {
-        adminSigners.push_back(strprintf("0x%08x", signerId));
-    }
+    result.push_back(Pair("dataHash", params[0]));
     result.push_back(Pair("signature", signature.ToString()));
-    result.push_back(Pair("adminSignerIds", adminSigners));
+    result.push_back(Pair("adminSignerId", strprintf("0x%08x", nChainAdminId)));
+
+    return result;
+}
+
+UniValue fasitoschnorrverify(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() < 2 || params.size() > 3)
+        throw runtime_error(
+            "fasitoschnorrverify \"dataHash\" \"signature\"\n"
+            "\nVerifies an EC Schnorr signature for the given hash\n"
+            "\nArguments:\n"
+            "1. \"data hash\"   (string, required) The hash of the signed data.\n"
+            "2. \"signature\"   (string, required) The signature for the hash.\n"
+            "3. \"public key\"  (string, optional) An optional public key to use to verify the signature.\n"
+            "\nExamples:\n"
+            "\nCreate a signature\n"
+            + HelpExampleCli("fasitoschnorrverify", "a1b5..9093 99cafecafe55..33224457")
+        );
+
+    LOCK(cs_main);
+
+    vector<uint8_t> vDataHash = ParseHex(params[0].get_str());
+
+    if (vDataHash.size() != 32)
+        return "ERROR: invalid data hash";
+
+    uint256 dataHash = uint256(vDataHash);
+
+    CSchnorrPubKey pubKey;
+
+    if (params.size() == 3) {
+        pubKey = CSchnorrPubKeyDER(params[2].get_str());
+        if (pubKey.IsNull())
+            return "ERROR: invalid public key";
+    } else {
+        if (!nChainAdminId || !adminPrivKey.IsValid())
+            return "ERROR: wallet not configured for chain administration";
+
+       pubKey = adminPubKey;
+    }
+
+    CSchnorrSig signature = CSchnorrSigS(params[1].get_str());
+    const bool fValid = CvnVerifySignature(dataHash, signature, pubKey);
+
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("result", fValid));
+    result.push_back(Pair("dataHash", params[0]));
+    result.push_back(Pair("signature", signature.ToString()));
+    result.push_back(Pair("pubKey", pubKey.ToString()));
+
+    return result;
+}
+
+UniValue fasitohash(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "fasitohash \"data\"\n"
+            "\nCreates a SHA256 (single) hash of the data\n"
+            "\nArguments:\n"
+            "1. \"data\"   (hex, required) The hash of the signed data.\n"
+            "\nExamples:\n"
+            "\nCreate a hash\n"
+            + HelpExampleCli("fasitohash", "a1b5..9093")
+        );
+
+    vector<uint8_t> vData = ParseHex(params[0].get_str());
+
+    if (vData.empty())
+        return "ERROR: invalid data";
+
+    CHashWriter hasher(SER_GETHASH, 0);
+
+    hasher.write((char *)&vData.begin()[0], vData.size());
+
+    uint256 hash = hasher.GetHash();
+
+    reverse(hash.begin(), hash.end());
+
+    return hash.ToString();
+}
+
+UniValue fasitocmd(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "fasitocmd \"command string\"\n"
+            "\nExecute a generic command on Fasito\n"
+            "\nArguments:\n"
+            "1. \"command\"   (string, required) The command string.\n"
+            "\nExamples:\n"
+            "\nShow Fasito information\n"
+            + HelpExampleCli("fasito", "INFO")
+        );
+
+    bool fWasInitialised = true;
+    if (!fasito.fInitialized) {
+        const string strDevice = GetArg("-fasitodevice", "/dev/ttyACM0");
+
+        fasito.open(strDevice);
+        fasito.setTimeout(boost::posix_time::seconds(2));
+        fWasInitialised = false;
+    } else
+        LogPrintf("Fasito was alreday initialised.\n");
+
+    vector<string> res;
+    fasito.sendAndReceive(params[0].get_str(), res);
+
+    string result;
+    for (const string & line : res) {
+        result += line + "\n";
+    }
+
+    if (!fWasInitialised)
+        fasito.close();
 
     return result;
 }
@@ -791,143 +1201,6 @@ UniValue bancvn(const UniValue& params, bool fHelp)
     return "OK";
 }
 
-UniValue getactivecvns(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() > 1)
-        throw runtime_error(
-            "getactivecvns\n"
-            "\nDisplay a list of all currently active CVN\n"
-            "\nArguments: none\n"
-            "\nResult:\n"
-            "{\n"
-            "  \"count\" : \"n\",                (numeric) The number currently activated CNVs\n"
-            "  \"currentHeight\" : \"n\",        (numberc) The current block height the result relates to\n"
-            "  \"cvns\" : [                    (array of json objects)\n"
-            "     {\n"
-            "       \"nodeId\": \"id\",          (string) The transaction id\n"
-            "       \"pubKey\": \"public key\",  (string) The public key of the CVN\n"
-            "       \"heightAdded\": n,        (numeric) The height when the CVN was added to the network\n"
-            "       \"predictedNextBlock\": n, (numeric) The height of the next block this CVNs most probably will create\n"
-            "       \"lastBlocksSigned\": n    (numeric) The number of blocks signed within the last " + strprintf("%d", (int)dynParams.nMinSuccessiveSignatures) + " blocks\n"
-            "     }\n"
-            "     ,...\n"
-            "  ],\n"
-            "}\n"
-            "\nExamples:\n"
-            "\nDisplay CVN list\n"
-            + HelpExampleCli("getactivecvns","")
-        );
-
-    LOCK(cs_mapCVNs);
-
-    UniValue result(UniValue::VOBJ);
-    result.push_back(Pair("count", (int)mapCVNs.size()));
-    result.push_back(Pair("currentHeight", chainActive.Tip()->nHeight));
-    UniValue cvns(UniValue::VARR);
-
-    BOOST_FOREACH(const CvnMapType::value_type& cvn, mapCVNs)
-    {
-        const CCvnInfo& c = cvn.second;
-
-        UniValue entry(UniValue::VOBJ);
-        entry.push_back(Pair("nodeId", strprintf("0x%08x", c.nNodeId)));
-        entry.push_back(Pair("pubKey", c.pubKey.ToString()));
-        entry.push_back(Pair("heightAdded", (int)c.nHeightAdded));
-
-        CCvnStatus status(c.nNodeId);
-        CheckNextBlockCreator(chainActive.Tip(), GetAdjustedTime(), &status);
-        entry.push_back(Pair("predictedNextBlock", (int)status.nPredictedNextBlock));
-        entry.push_back(Pair("lastBlocksSigned", (int)status.nBlockSigned));
-
-        cvns.push_back(entry);
-    }
-
-    result.push_back(Pair("cvns", cvns));
-
-    return result;
-}
-
-UniValue getactiveadmins(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() > 1)
-        throw runtime_error(
-            "getactiveadmins\n"
-            "\nDisplay a list of all currently active chain administrators\n"
-            "\nArguments: none\n"
-            "\nResult:\n"
-            "{\n"
-            "  \"count\" : \"n\",               (numeric) The number currently activated CNVs\n"
-            "  \"currentHeight\" : \"n\",       (numberc) The current block height the result relates to\n"
-            "  \"admins\" : [                 (array of json objects)\n"
-            "     {\n"
-            "       \"adminId\": \"id\",        (string) The transaction id\n"
-            "       \"pubKey\": \"public key\", (string) The public key of the CVN\n"
-            "       \"heightAdded\": n        (numeric) The height when the CVN was added to the network\n"
-            "     }\n"
-            "     ,...\n"
-            "  ],\n"
-            "}\n"
-            "\nExamples:\n"
-            "\nDisplay Chain Admins list\n"
-            + HelpExampleCli("getactiveadmins","")
-        );
-
-    LOCK(cs_mapChainAdmins);
-
-    UniValue result(UniValue::VOBJ);
-    result.push_back(Pair("count", (int)mapChainAdmins.size()));
-    result.push_back(Pair("currentHeight", chainActive.Tip()->nHeight));
-    UniValue admins(UniValue::VARR);
-
-    BOOST_FOREACH(const ChainAdminMapType::value_type& admin, mapChainAdmins)
-    {
-        const CChainAdmin& a = admin.second;
-
-        UniValue entry(UniValue::VOBJ);
-        entry.push_back(Pair("adminId", strprintf("0x%08x", a.nAdminId)));
-        entry.push_back(Pair("pubKey", a.pubKey.ToString()));
-        entry.push_back(Pair("heightAdded", (int)a.nHeightAdded));
-
-        string strCurrentNonce = "";
-        if (mapAdminNonces.count(a.nAdminId)) {
-            strCurrentNonce = mapAdminNonces[a.nAdminId].ToString();
-        }
-
-        entry.push_back(Pair("currentNonce", strCurrentNonce));
-
-        string strCurrentPartialSig = "";
-        if (mapAdminSigs.count(a.nAdminId)) {
-            strCurrentPartialSig = mapAdminSigs[a.nAdminId].signature.ToString();
-        }
-
-        entry.push_back(Pair("currentPartialSig", strCurrentPartialSig));
-
-        admins.push_back(entry);
-    }
-
-    result.push_back(Pair("admins", admins));
-
-    return result;
-}
-
-void DynamicChainparametersToJSON(CDynamicChainParams& cp, UniValue& result)
-{
-    result.push_back(Pair("version", (int)cp.nVersion));
-    result.push_back(Pair("minAdminSigs", (int)cp.nMinAdminSigs));
-    result.push_back(Pair("maxAdminSigs", (int)cp.nMaxAdminSigs));
-    result.push_back(Pair("blockSpacing", (int)cp.nBlockSpacing));
-    result.push_back(Pair("blockSpacingGracePeriod", (int)cp.nBlockSpacingGracePeriod));
-    result.push_back(Pair("transactionFee", ValueFromAmount(cp.nTransactionFee)));
-    result.push_back(Pair("dustThreshold", ValueFromAmount(cp.nDustThreshold)));
-    result.push_back(Pair("minSuccessiveSignatures", (int)cp.nMinSuccessiveSignatures));
-    result.push_back(Pair("blocksToConsiderForSigCheck", (int)cp.nBlocksToConsiderForSigCheck));
-    result.push_back(Pair("percentageOfSignaturesMean", (int)cp.nPercentageOfSignaturesMean));
-    result.push_back(Pair("maxBlockSize", (int)cp.nMaxBlockSize));
-    result.push_back(Pair("blockPropagationWaitTime", (int)cp.nBlockPropagationWaitTime));
-    result.push_back(Pair("retryNewSigSetInterval", (int)cp.nRetryNewSigSetInterval));
-    result.push_back(Pair("description", cp.strDescription));
-}
-
 UniValue setchainparameters(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
@@ -943,7 +1216,7 @@ UniValue setchainparameters(const UniValue& params, bool fHelp)
              "}\n"
             "\nExamples:\n"
             "\nSet chain parameters\n"
-            + HelpExampleCli("setchainparameters", "\"{\\\"blockSpacing\\\":\\\"180\\\",\\\"blockSpacingGracePeriod\\\":\\\"60\\\"}")
+            + HelpExampleCli("setchainparameters", "\"{\\\"blockSpacing\\\":\\\"180\\\",\\\"blockSpacingGracePeriod\\\":\\\"60\\\"}\"")
         );
 
     if (IsInitialBlockDownload())
@@ -988,30 +1261,6 @@ UniValue setchainparameters(const UniValue& params, bool fHelp)
         LogPrintf("ERROR\n%s\n", msg.ToString());
         return "could not add chain data, see error log";
     }
-
-    return result;
-}
-
-UniValue getchainparameters(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getchainparameters\n"
-            "\nDisplay the current values of the dynamic chain parameters\n"
-            "\nArguments:\n"
-            "none\n"
-            "\nResult:\n"
-            "{\n"
-                "  \"nextBlockToCreate\":height     ,           (int) The estimated next block to create\n"
-                "  \"reserved\":\"reserved\",                   (string) reserved\n"
-             "}\n"
-            "\nExamples:\n"
-            "\nDisplay dynamic chain parameters\n"
-            + HelpExampleCli("getchainparameters","")
-        );
-
-    UniValue result(UniValue::VOBJ);
-    DynamicChainparametersToJSON(dynParams, result);
 
     return result;
 }
@@ -1150,34 +1399,36 @@ UniValue submitblock(const UniValue& params, bool fHelp)
     return BIP22ValidationResult(state);
 }
 
-#ifdef ENABLE_COINSUPPLY
 UniValue addcoinsupply(const UniValue& params, bool fHelp)
 {
-    if (fHelp || params.size() != 3)
+    if (fHelp || params.size() != 4)
         throw runtime_error(
-            "addcoinsupply \"faircoinaddress\" \"amount\"  \"comment\" \"admin sigs\"\n"
+            "addcoinsupply \"faircoinaddress\" \"amount\" \"isFinal\" \"comment\"\n"
             "\nAdd instructions to increase the coin supply to the FairCoin network\n"
             "\nArguments:\n"
             "1. \"faircoinaddress\"  (string, required) The FairCoin address to send to.\n"
-            "2. \"amount\"           (numeric or string, required) The amount in " + CURRENCY_UNIT + " to send. eg 0.1\n"
-            "3. \"comment\"          (string, required) A comment used to store what this additional supply is for. \n"
+            "2. \"amount\"           (numeric or string, required) The amount in " + CURRENCY_UNIT + " to send. E.g. 33.1234 " + CURRENCY_UNIT + ".\n"
+            "3. \"isFinal\"          (bool, required) Whether this is the last coin supply that can be added to the blockchain.\n"
+            "4. \"description\"      (string, required) A description of the coin supply.\n"
             "\nResult:\n"
             "{\n"
-                "  \"type\":\"type of added info\",             (string) The type of the added info (c=CVNInfo, a=ChainAdmin)\n"
-                "  \"Id\":\"ID in hex\",                        (hex) The ID of the new CVN (or admin) in hexadecimal form\n"
-                "  \"prevBlockHash\":\"hash (hex)\",            (string) The timestamp of the block\n"
-                "  \"address\":\"faircoin address\",            (string) The FairCoin address of the new CVN.\n"
-                "  \"pubKey\":\"public key\",                   (string) The public key of the new CVN (in hex).\n"
-                "  \"signatures\":\"number of signatures\"      (string) The number of admin signatures that signed the CvnInfo.\n"
-                "  \"chainParams\":\"serialized params\"        (string) The serialized representation of CDynamicChainParams.\n"
+                "  \"msghash\":\"the hash of the message\",     (string) The message hash\n"
+                "  \"address\":\"the destination address\",     (string) The address of the supply's output\n"
+                "  \"amount\":amount of coins to add,         (numeric) The number of coins to add\n"
+                "  \"isFinal\":\"is this the final supply\",    (string) Is it the last coins supply in the blockchain\n"
+                "  \"description\":\"description of this supply\", (string) Description\n"
+                "  \"script\":\"the destination script\"        (string) The output script\n"
              "}\n"
             "\nExamples:\n"
             "\nAdd a new coin supply\n"
-            + HelpExampleCli("addcoinsupply", "fairVs8iHyLzgHQrdxb9j6hR4WGpdDbKN3 4000.777 \"thewaterproject.org\"")
+            + HelpExampleCli("addcoinsupply", "fairVs8iHyLzgHQrdxb9j6hR4WGpdDbKN3 4000.777 false \"thewaterproject.org\"")
         );
 
     if (IsInitialBlockDownload())
         throw JSONRPCError(RPC_IN_WARMUP, "wait for block chain download to finish");
+
+    if (fCoinSupplyFinal)
+        throw JSONRPCError(RPC_MISC_ERROR, "coins supply is already final");
 
     CBitcoinAddress address(params[0].get_str());
     if (!address.IsValid())
@@ -1188,8 +1439,8 @@ UniValue addcoinsupply(const UniValue& params, bool fHelp)
     if (nAmount <= 0)
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount");
 
-    if (params[2].isNull() || params[2].get_str().empty())
-        throw JSONRPCError(RPC_TYPE_ERROR, "The comment is mandatory");
+    if (params[3].isNull() || params[3].get_str().empty())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Missing mandatory comment string");
 
     CChainDataMsg msg;
     CCoinSupply& spl = msg.coinSupply;
@@ -1198,6 +1449,13 @@ UniValue addcoinsupply(const UniValue& params, bool fHelp)
     msg.hashPrevBlock        = chainActive.Tip()->GetBlockHash();
     spl.nValue               = nAmount;
     spl.scriptDestination    = GetScriptForDestination(address.Get());
+    spl.fFinalCoinsSupply    = params[2].get_bool();
+    spl.strDescription       = params[3].get_str();
+
+    if (spl.strDescription.length() <= MIN_CHAIN_DATA_DESCRIPTION_LEN) {
+        LogPrintf("%s : description too short\n", __func__);
+        return false;
+    }
 
     UniValue result(UniValue::VOBJ);
 
@@ -1226,26 +1484,10 @@ UniValue addcoinsupply(const UniValue& params, bool fHelp)
     result.push_back(Pair("msghash", msg.GetHash().ToString()));
     result.push_back(Pair("address", address.ToString()));
     result.push_back(Pair("amount", ValueFromAmount(nAmount)));
-    result.push_back(Pair("comment", msg.strComment));
+    result.push_back(Pair("isFinal", spl.fFinalCoinsSupply));
+    result.push_back(Pair("description", spl.strDescription));
     result.push_back(Pair("script", ScriptToAsmStr(msg.coinSupply.scriptDestination, true)));
     return result;
 }
-#endif
 
-UniValue estimatefee(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw std::runtime_error(
-            "estimatefee nblocks\n"
-            "\nReturns the current mandatory fee per kilobyte needed for a transaction to be accepted.\n"
-            "\nArguments:\n"
-            "1. nblocks     (numeric, required) - dummy value for API compatibility\n"
-            "\nResult:\n"
-            "n              (numeric) mandatory fee-per-kilobyte\n"
-            "\n"
-            "\nExample:\n"
-            + HelpExampleCli("estimatefee", "123")
-            );
-
-    return ValueFromAmount(dynParams.nTransactionFee);
-}
+#endif // USE_CVN

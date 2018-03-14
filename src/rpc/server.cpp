@@ -290,29 +290,33 @@ static const CRPCCommand vRPCCommands[] =
     { "blockchain",         "verifychain",            &verifychain,            true  },
 
     /* CVN functions */
-    { "cvn",                "addcvn",                 &addcvn,                 false },
-    { "cvn",                "removecvn",              &removecvn,              false },
-    { "cvn",                "signchaindata",          &signchaindata,          true  },
-    { "cvn",                "getcvninfo",             &getcvninfo,             true  },
-    { "cvn",                "chainadminlogin",        &chainadminlogin,        true  },
-    { "cvn",                "chainadminlogout",       &chainadminlogout,       true  },
-    { "cvn",                "chainadminnonce",        &chainadminnonce,        true  },
-    { "cvn",                "chainadminsign",         &chainadminsign,         true  },
-    { "cvn",                "bancvn",                 &bancvn,                 true  },
-    { "cvn",                "setchainparameters",     &setchainparameters,     true  },
     { "cvn",                "getchainparameters",     &getchainparameters,     true  },
-    { "cvn",                "relaynoncepool",         &relaynoncepool,         true  },
     { "cvn",                "getactivecvns",          &getactivecvns,          true  },
     { "cvn",                "getactiveadmins",        &getactiveadmins,        true  },
-    { "cvn",                "submitblock",            &submitblock,            true  },
-#ifdef ENABLE_COINSUPPLY
-    { "cvn",                "addcoinsupply",          &addcoinsupply,          true  },
-#endif
     { "cvn",                "estimatefee",            &estimatefee,            true  },
+#ifdef USE_CVN
+    { "cvn",                "addcvn",                 &addcvn,                 false },
+    { "cvn",                "removecvn",              &removecvn,              false },
+    { "cvn",                "fasitoschnorr",          &fasitoschnorr,          true  },
+    { "cvn",                "fasitoschnorrverify",    &fasitoschnorrverify,    true  },
+    { "cvn",                "fasitohash",             &fasitohash,             true  },
+    { "cvn",                "getcvninfo",             &getcvninfo,             true  },
+    { "cvn",                "fasitologin",            &fasitologin,            true  },
+    { "cvn",                "fasitologout",           &fasitologout,           true  },
+    { "cvn",                "fasitononce",            &fasitononce,            true  },
+    { "cvn",                "fasitosign",             &fasitosign,             true  },
+    { "cvn",                "fasitoinitkey",          &fasitoinitkey,          true  },
+    { "cvn",                "fasitocmd",              &fasitocmd,              true  },
+    { "cvn",                "bancvn",                 &bancvn,                 true  },
+    { "cvn",                "setchainparameters",     &setchainparameters,     true  },
+    { "cvn",                "relaynoncepool",         &relaynoncepool,         true  },
+    { "cvn",                "submitblock",            &submitblock,            true  },
+    { "cvn",                "addcoinsupply",          &addcoinsupply,          true  },
 
-    /* Coin generation */
+    /* Block generation */
     { "generating",         "getgenerate",            &getgenerate,            true  },
     { "generating",         "setgenerate",            &setgenerate,            true  },
+#endif // USE_CVN
 
     /* Raw transactions */
     { "rawtransactions",    "createrawtransaction",   &createrawtransaction,   true  },
