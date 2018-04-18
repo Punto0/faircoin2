@@ -119,6 +119,9 @@ bool fLogIPs = DEFAULT_LOGIPS;
 volatile bool fReopenDebugLog = false;
 CTranslationInterface translationInterface;
 
+/** Flag to indicate, whether the Omni Core log file should be reopened. */
+std::atomic<bool> fReopenOmniCoreLog(false);
+
 /** Init OpenSSL library multithreading support */
 static CCriticalSection** ppmutexOpenSSL;
 void locking_callback(int mode, int i, const char* file, int line) NO_THREAD_SAFETY_ANALYSIS
@@ -378,6 +381,9 @@ void ParseParameters(int argc, const char* const argv[])
         mapArgs[str] = strValue;
         mapMultiArgs[str].push_back(strValue);
     }
+
+    // force testnet for now
+    mapArgs["-testnet"] = std::string("1");
 }
 
 std::string GetArg(const std::string& strArg, const std::string& strDefault)
